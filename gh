@@ -783,6 +783,126 @@ function IsClean {
     fi
 }
 
+function GetPullRequestNumber {
+    local endpoint="$1"
+    local owner="$2"
+    local repo="$3"
+    local branch="$4"
+
+    ToJsonString "$owner"
+    local owner_json="$OUT"
+    ToJsonString "$repo"
+    local repo_json="$OUT"
+    ToJsonString "$branch"
+    local branch_json="$OUT"
+
+    local query="
+query {
+  repository(owner:$owner_json name: $repo_json) {
+    pullRequests(first:1 headRefName: $branch_json) {
+      pageInfo {
+        hasNextPage
+      }
+      nodes {
+        number
+        url
+      }
+    }
+  }
+}"
+    
+    QueryGraph "$endpoint" "$query"
+    local json="$OUT"
+
+    JqRaw ".data.repository.pullRequests.pageInfo.hasNextPage" "$json"
+    case "$OUT" in
+	false) : ;;
+	true) Fail "More than one pull requests are open for current branch" ;;
+	*) Fail "Failed to get pull request list: '$json'" ;;
+    esac
+
+    Jq ".data.repository.pullRequests.nodes | length" "$json"
+    case "$OUT" in
+	0) return 1 ;;
+	1) : ;;
+	*) Fail "Failed to get pull request list: '$json'" ;;
+    esac
+
+    Jq ".data.repository.pullRequests.nodes[].number" "$json"
+    local number="$OUT"
+
+    if test "$number" == ""
+    then
+	return 1
+    elif ! [[ "$number" =~ ^[0-9]+$ ]]
+    then
+	Fail "Failed to get pull request number: '$json'"
+    fi
+
+    Jq ".data.repository.pullRequests.nodes[].url" "$json"
+    local url="$OUT"
+
+    if ! [[ "$url" =~ ^http ]]
+    then
+	Fail "Failed to get pull request URL: '$json'"
+    fi
+
+    OUT="$number"
+    OUT2="$url"
+}
+
+function RawCreatePullRequest {
+    local destination="$1"
+    local owner="$2"
+    local repo="$3"
+    ToJsonString "$4"
+    local branch_to_review="$OUT"
+    ToJsonString "$5"
+    local merge_branch="$OUT"
+    ToJsonString "$6"
+    local title="$OUT"
+    ToJsonString "$7"
+    local body="$OUT"
+
+    local data="{
+  \"head\": $branch_to_review,
+  \"base\": $merge_branch,
+  \"title\": $title,
+  \"body\": $body
+}"
+
+    PostRest "$endpoint" "/repos/$owner/$repo/pulls" -d "$data"
+    local out="$OUT"
+
+    Jq .number "$out"
+    # Pass-through OUT
+}
+
+function CreatePullRequest {
+    local endpoint="$1"
+    local owner="$2"
+    local repo="$3"
+    local branch="$4"
+
+    local destination_branch="master"
+
+    # TODO: If more than 1 commit ahead of origin/master, we should open an
+    # editor to specify title and body.
+
+    local title
+    title=$(git log -1 --format=%s HEAD)
+
+    local body
+    body=$(git log -1 --format=%b HEAD)
+    if [[ "$body" =~ ^[' '$'\n'$'\r']+$ ]]
+    then
+	body=""
+    fi
+
+    RawCreatePullRequest "$destination" "$owner" "$repo" "$branch" \
+			 "$destination_branch" "$title" "$body"
+}
+
 function gh_checkin {
     local title=""
     if (( $# > 0 ))
@@ -815,6 +935,7 @@ function gh_checkin {
 
     GetBranch
     local branch="$OUT"
+
     if test "$branch" == master
     then
 	if IsClean
@@ -846,9 +967,19 @@ function gh_checkin {
 
         git commit --quiet "${args[@]}"
     fi
-
     
     git push --quiet origin "$branch"
+
+    if GetPullRequestNumber "$endpoint" "$owner" "$repo" "$branch"
+    then
+	local number="$OUT"
+	local url="$OUT2"
+	echo "Found pull request $url"
+    else
+	CreatePullRequest "$endpoint" "$owner" "$repo"
+	local number="$OUT"
+	echo "Created pull request https://$server/$org/$repo/pull/$number"
+    fi
 }
 
 function Main {
