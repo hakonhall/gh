@@ -33,9 +33,21 @@ function Usage {
 	printf "%s\n" "$arg"
     done
 
+    local config_file="${CONFIG_FILE/#$HOME/\~}"
+    local repos_file="${REPOS_FILE/#$HOME/\~}"
+
     cat <<EOF
 Usage: $PROGRAM COMMAND [OPTION...] [ARG...]
 Git and GitHub tool.
+
+Commands:
+  checkin|ci [TITLE]
+      Push local change to pull request.
+  clone PATTERN
+      Clone ENDPOINT:OWNER/REPO matching PATTERN from $repos_file.
+  help
+  refresh
+      Read $config_file and generate $repos_file cache.
 EOF
 
     exit 1
@@ -716,16 +728,21 @@ function GetBranch {
 }
 
 function gh_info {
+    if (( $# != 0 ))
+    then
+	UsageError undo "Command takes exactly zero arguments"
+    fi
+
     GitHubInfoFromOrigin
     local endpoint="$OUT"
     local owner="$OUT2"
     local repo="$OUT3"
     local ssh_url="$OUT4"
 
-    echo "Remote origin: $ssh_url"
+    echo "origin: $ssh_url"
 
     GetBranch
-    echo "Branch: $OUT"
+    echo "branch: $OUT"
 
     Stage
     Run git status --short
@@ -936,8 +953,6 @@ function gh_checkin {
     local graphql_url="$OUT4"
     local checks=("${OUTA[@]}")
 
-    Stage
-
     local is_clean=""
 
     GetBranch
@@ -959,7 +974,8 @@ function gh_checkin {
 	fi
 	branch="$user/$branch"
 
-	git stash save --quiet
+	Stage
+	git stash save --quiet --include-untracked
 	git checkout --quiet -b "$branch"
 	git stash pop --quiet
     fi
@@ -972,6 +988,7 @@ function gh_checkin {
 	    args+=(-m "$title")
 	fi
 
+	Stage
         git commit --quiet "${args[@]}"
     fi
     
@@ -988,6 +1005,67 @@ function gh_checkin {
 	local url="$OUT2"
 	echo "Created pull request $url"
     fi
+}
+
+function gh_undo {
+    if (( $# > 0 ))
+    then
+	UsageError undo "Command takes exactly zero arguments"
+    fi
+
+    git reset --soft HEAD^
+    Stage
+}
+
+function gh_checkout {
+    if (( $# != 1 ))
+    then
+	UsageError undo "Command takes exactly one argument"
+    fi
+    local branch="$1"
+
+    if IsClean
+    then
+	git checkout --quiet "$branch"
+    else
+	git stash save --quiet
+	git checkout --quiet "$branch"
+	git stash pop --quiet
+    fi
+}
+
+function gh_update {
+    if (( $# != 0 ))
+    then
+	UsageError undo "Command takes exactly zero arguments"
+    fi
+
+    GetBranch
+    local branch="$OUT"
+
+    CaptureStd git stash --include-untracked
+    local stash_output="$OUT"
+
+    if [ "$branch" == master ]
+    then
+	git pull --quiet --rebase
+    else
+	Fail "Refuse to update non-master branch"
+    fi
+
+    if ! [[ "$stash_output" =~ ^'No local changes to save'$ ]]
+    then
+        # Cannot be --quiet, since it swallows warnings about conflicts.
+	Run git stash pop
+    fi
+
+    Stage
+    gh_info
+}
+
+function gh_diff {
+    Stage
+    git diff HEAD
 }
 
 function Main {
@@ -1010,9 +1088,18 @@ function Main {
 	[ci]=gh_checkin
 	[clone]=gh_clone
 	[help]=Usage
+	[refresh]=gh_refresh
+
+	# Unofficial commands
+	[checkout]=gh_checkout
+	[co]=gh_checkout
+	[di]=gh_diff
+	[diff]=gh_diff
 	[i]=gh_info
 	[info]=gh_info
-	[refresh]=gh_refresh
+	[undo]=gh_undo
+	[up]=gh_update
+	[update]=gh_update
 
 	# Experimental/debug commands
 	[orgs]=gh_orgs
