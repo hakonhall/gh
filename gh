@@ -976,7 +976,7 @@ function gh_checkin {
 	local url="$OUT2"
 	echo "Found pull request $url"
     else
-	CreatePullRequest "$endpoint" "$owner" "$repo"
+	CreatePullRequest "$endpoint" "$owner" "$repo" "$branch"
 	local number="$OUT"
 	echo "Created pull request https://$server/$org/$repo/pull/$number"
     fi
