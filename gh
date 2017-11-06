@@ -1,0 +1,1032 @@
+#!/bin/bash
+#
+# Usage: gh
+
+set -e
+
+declare -r CONFIG_FILE="$HOME/.gh"
+declare -r PROGRAM="${0##*/}"
+declare -r REPOS_FILE="$HOME/.gh-repos"
+
+declare ECHO_COMMAND=false
+
+# Generic global variables to hold output from functions
+declare OUT="" OUT2="" OUT3="" OUT4="" OUT5="" OUT6=""
+declare -a OUTA=()
+declare -A OUTH=()
+
+function Fail {
+    local arg
+    for arg in "$@"
+    do
+	printf "%s" "$arg"
+    done
+    echo
+
+    exit 1
+}
+
+function Usage {
+    local arg
+    for arg in "$@"
+    do
+	printf "%s\n" "$arg"
+    done
+
+    cat <<EOF
+Usage: $PROGRAM COMMAND [OPTION...] [ARG...]
+Git and GitHub tool.
+EOF
+
+    exit 1
+}
+
+function UsageError {
+    local command="$1"
+    shift
+    
+    if test "$command" == ""
+    then
+	local command_text=" of 'gh'"
+    else
+	local command_text=" of 'gh $command'"
+    fi
+
+    Fail "Bad invocation$command_text: " "$@" \
+	     $'\n'"See '$PROGRAM help' for details"
+}
+
+function EchoCommand {
+    printf "%q" "$1"
+    shift
+
+    local arg
+    for arg in "$@"
+    do
+	printf " %q" "$arg"
+    done
+    printf "\\n"
+}
+
+function MaybeEchoCommand {
+    if $ECHO_COMMAND
+    then
+	EchoCommand "$@"
+    fi
+}
+
+function Run {
+    MaybeEchoCommand "$@"
+    "$@"
+}
+
+function Git {
+    if ! git "$@"
+    then
+	Fail "git $* command failed"
+    fi
+}
+
+function CaptureStd {
+    local -a command=("$@")
+
+    local out
+    if ! out=$("${command[@]}" 2>&1)
+    then
+	Fail "Command '${command[*]}' failed unexpectedly: '$out'"
+    fi
+
+    OUT="$out"
+}
+
+function PrintLines {
+    local arg
+    for arg in "$@"
+    do
+	printf "%s\n" "$arg"
+    done
+}
+
+function Sort {
+    local -a elements=("$@")
+
+    OUTA=()
+    mapfile -t OUTA <<< "$(PrintLines "${elements[@]}" | sort)"
+}
+
+function Match {
+    local __Match_regex="$1"
+    local __Match_text="$2"
+    shift 2
+
+    [[ "$__Match_text" =~ $__Match_regex ]]
+    local -i __Match_status="$?"
+
+    if test "$__Match_status" == 0
+    then
+	local -i __Match_index=1
+	local __Match_variable_name
+	for __Match_variable_name in "$@"
+	do
+	    if test "$__Match_variable_name" != ""
+	    then
+		local -n __Match_variable="$__Match_variable_name"
+		__Match_variable="${BASH_REMATCH[$__Match_index]}"
+	    fi
+	    __Match_index+=1
+	done
+    elif test "$__Match_status" != 1
+    then
+	Fail "Bad regular expression: '$__Match_regex'"
+    fi
+
+    return "$__Match_status"
+}
+
+# Set OUT to a "JSON string" with the value of $1
+# 
+# Example: The string 'unescaped' defined as follows:
+#     local unescaped='This is a "good" example
+#     over two lines'
+# would be escaped by ToJsonString to:
+#     OUT='"This a \"good\" example\nover two lines'
+function ToJsonString {
+    local string="$1"
+
+    local json_string="$string"
+    json_string="${json_string//\\/\\\\}"
+    json_string="${json_string//\"/\\\"}"
+
+    local newline=$'\n'
+    json_string="${json_string//$newline/\\n}"
+
+    local tab=$'\t'
+    json_string="${json_string//$tab/\\t}"
+
+    OUT="\"$json_string\""
+}
+
+function Jq {
+    local jq_expression="$1"
+    local json="$2"
+    shift 2
+
+    local out
+    if ! out=$(jq "$@" "$jq_expression" <<< "$json" 2>&1)
+    then
+	Fail "'jq' with expression '$jq_expression' failed on json '$json' " \
+	     "printing '$out'"
+    fi
+
+    OUT="$out"
+}
+
+function JqRaw {
+    Jq "$@" -r
+}
+
+function JqRawLines {
+    local jq_expression="$1"
+    local json="$2"
+
+    JqRaw "$jq_expression" "$json"
+    local out="$OUT"
+
+    local -a lines=()
+    while read -r
+    do
+	local line="$REPLY"
+	lines+=("$line")
+    done <<< "$out"
+
+    OUTA=("${lines[@]}")
+}
+
+function ReadConfigAsString {
+    if ! test -e "$CONFIG_FILE"
+    then
+	Fail "Please make a config file '$CONFIG_FILE'"
+    fi
+
+    OUT=$(< "$CONFIG_FILE")
+}
+
+function GetEndpoints {
+    ReadConfigAsString
+    local config="$OUT"
+
+    JqRawLines ".endpoints[].name" "$config"
+    # Forward OUTA
+}
+
+function ResolveEndpoint {
+    local endpoint="$1"
+
+    ReadConfigAsString
+    local config="$OUT"
+
+    ToJsonString "$endpoint"
+    local name="$OUT"
+
+    Jq ".endpoints[] | select(.name == $name)" "$config"
+    local json="$OUT"
+
+    JqRaw .api_authority "$json"
+    local api_authority="$OUT"
+    local api_authority_regex='^[a-zA-Z0-9.:-]+$'
+    if ! [[ "$api_authority" =~ $api_authority_regex ]]
+    then
+	Fail "Invalid api_authority found in $CONFIG_FILE for endpoint " \
+	     "'$endpoint': Is expected to match " \
+	     "'$api_authority_regex' but is '$api_authority'"
+    fi
+
+    JqRaw .user "$json"
+    local user="$OUT"
+    local user_regex='^[a-zA-Z0-9_-]+$'
+    if ! [[ "$user" =~ $user_regex ]]
+    then
+	Fail "Invalid user found in $CONFIG_FILE for endpoint " \
+	     "'$endpoint': Is expected to match " \
+	     "'$user_regex' but is '$user'"
+    fi
+
+    JqRaw .token "$json"
+    local token="$OUT"
+    local token_regex='^[a-zA-Z0-9=]{40}$'
+    if ! [[ "$token" =~ $token_regex ]]
+    then
+	Fail "Invalid token found in $CONFIG_FILE for endpoint " \
+	     "'$endpoint': Is expected to match " \
+	     "'$token_regex' but is '$token'"
+    fi
+
+    JqRawLines '.checks[]' "$json"
+    local -a checks=("${OUTA[@]}")
+
+    if test "$api_authority" == api.github.com
+    then
+	local rest_url="https://$api_authority"
+	local graphql_url="https://$api_authority/graphql"
+    else
+	# WARNING: This is assuming GitHub Enterprise setup
+	local rest_url="https://$api_authority/api/v3"
+	local graphql_url="https://$api_authority/api/graphql"
+    fi
+
+    OUT="$rest_url"
+    OUT2="$user"
+    OUT3="$token"
+    OUT4="$graphql_url"
+    OUTA=("${checks[@]}")
+}
+
+function Curl {
+    local url="$1"
+    local token="$2"
+    shift 2
+    local -a args=("$@")
+
+    local save_dir="$HOME/tmp/gh.cache"
+    mkdir -p "$save_dir"
+
+    # Note: Cannot use <<< with tr since it adds a newline
+    local url_filename=$(printf "%s" "$url" | tr -c 'a-zA-Z0-9_-' '_')
+    local command_file="$save_dir/$url_filename.command"
+    local response_file="$save_dir/$url_filename.response"
+
+    local -a command=(
+	curl
+	--silent
+	--fail
+	--output "$response_file"
+	--write-out "%{http_code}"
+	-H "Content-Type: application/json"
+	-H "Accept: application/vnd.github.v3+json"
+	-H "Authorization: token $token"
+	"${args[@]}"
+	"$url"
+    )
+
+    EchoCommand "${command[@]}" > "$command_file"
+    # Avoid stale response_file in case it's not overwritten:
+    rm -f "$response_file"
+
+    local -i http_code=0
+    MaybeEchoCommand "${command[@]}"
+    if http_code=$("${command[@]}")
+    then
+	if (( http_code < 200 || http_code >= 300 ))
+	then
+	    Fail "HTTP response code $http_code for command: ${command[*]}"
+	fi
+    else
+	local -i status="$?"
+	local message="Curl failed with status $status"
+
+	if (( http_code > 0 ))
+	then
+	    message+=" and HTTP status code $http_code"
+	fi
+
+	message+=" for command:"$'\n'$(< "$command_file")
+
+	if test -e "$response_file"
+	then
+	    local response=$(< "$response_file")
+	    if (( ${#response} > 0 ))
+	    then
+		message+=$'\n'"With HTTP response body:"$'\n'"$response"
+	    else
+		message+=$'\n'"With empty HTTP response body"
+	    fi
+	else
+	    message+=$'\n'"With absent HTTP response body"
+	fi
+
+	Fail "$message"
+    fi
+
+    OUT=$(< "$response_file")
+}
+
+function CurlRest {
+    local endpoint="$1"
+    local path="$2" # E.g. /repos/user
+    shift 2
+
+    ResolveEndpoint "$endpoint"
+    local rest_url="$OUT"
+    local user="$OUT2"
+    local token="$OUT3"
+
+    local url="${rest_url%/}/${path#/}"
+
+    Curl "$url" "$token" "$@"
+}
+
+function GetRest {
+    CurlRest "$@" -X GET 
+}
+
+# Usage: PostRest ENDPOINT PATH -d '...' ...
+function PostRest {
+    CurlRest "$@" -X POST 
+}
+
+function QueryGraph {
+    local endpoint="$1"
+    local query="$2"
+    shift 2
+
+    ToJsonString "$query"
+    local query_json="$OUT"
+    local json="{\"query\": $query_json}"
+
+    ResolveEndpoint "$endpoint"
+    local user="$OUT2"
+    local token="$OUT3"
+    local graphql_url="$OUT4"
+
+    Curl "$graphql_url" "$token" "$@" -X POST -d "$json"
+}
+
+function GetOrgs {
+    local endpoint="$1"
+
+    ResolveEndpoint "$endpoint"
+    local user="$OUT2"
+
+    ToJsonString "$user"
+    local user_json="$OUT"
+
+    local query="
+query {
+  user(login:$user_json) {
+    organizations(first:100) {
+      totalCount
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+      nodes {
+        name
+        login
+        url
+      }
+    }
+  }
+}
+"
+
+    QueryGraph "$endpoint" "$query"
+    local orgs_json="$OUT"
+
+    JqRawLines ".data.user.organizations.nodes[].login" "$orgs_json"
+    local -a orgs=("${OUTA[@]}")
+
+    OUTA=("${orgs[@]}")
+}
+
+function gh_orgs {
+    if (( $# != 1 ))
+    then
+	UsageError orgs "Expected exactly one argument: the endpoint name"
+    fi
+
+    local endpoint="$1"
+
+    GetOrgs "$endpoint"
+    PrintLines "${OUTA[@]}"
+}
+
+function GetRepos {
+    local endpoint="$1"
+    local owner="$2" # organization or user
+    
+    local -a repos=()
+
+    ToJsonString "$owner"
+    local owner_json="$OUT"
+
+    local after_text=""
+
+    while true
+    do
+	local query="
+query {
+  repositoryOwner(login:$owner_json) {
+    repositories(first:100$after_text) {
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+      nodes {
+        name
+      }
+    }
+  }
+}"
+
+	QueryGraph "$endpoint" "$query"
+	local response_json="$OUT"
+
+	JqRawLines ".data.repositoryOwner.repositories.nodes[].name" \
+		   "$response_json"
+	repos+=("${OUTA[@]}")
+
+	JqRaw ".data.repositoryOwner.repositories.pageInfo.hasNextPage" \
+	      "$response_json"
+	local has_next_page="$OUT"
+
+	case "$has_next_page" in
+	    true) : ;;
+	    false) break ;;
+	    *) Fail "Bas hasNextPage value in response: '$has_next_page'" ;;
+	esac
+
+	JqRaw ".data.repositoryOwner.repositories.pageInfo.endCursor" \
+	      "$response_json"
+	local end_cursor="$OUT"
+
+	if ! Match '^[a-zA-Z0-9=]+$' "$end_cursor"
+	then
+	    Fail "Bas endCursor value in response: '$end_cursor'"
+	fi
+
+	ToJsonString "$end_cursor"
+	local end_cursor_json="$OUT"
+	after_text=" after:$end_cursor_json"
+    done
+
+    OUTA=("${repos[@]}")
+    Sort "${OUTA[@]}"
+}
+
+function gh_repos {
+    if (( $# != 2 ))
+    then
+	UsageError repos "Command takes exactly two arguments"
+    fi
+
+    local endpoint="$1"
+    local owner="$2"
+
+    GetRepos "$endpoint" "$owner"
+    PrintLines "${OUTA[@]}"
+}
+
+function gh_refresh {
+    if (( $# != 0 ))
+    then
+	UsageError repos-refresh "Takes exactly 0 arguments"
+    fi
+
+    local repos_workfile="$HOME/.gh-repos.tmp"
+    > "$repos_workfile"
+
+    GetEndpoints
+    local -a endpoints=("${OUTA[@]}")
+
+    local endpoint
+    for endpoint in "${endpoints[@]}"
+    do
+	if [[ "$endpoint" =~ ' ' ]]
+	then
+	    Fail "The file format assumes endpoint '$endpoint' doesn't " \
+		 "doesn't contains space"
+	fi
+
+	GetOrgs "$endpoint"
+	local -a orgs=("${OUTA[@]}")
+
+	ResolveEndpoint "$endpoint"
+	local user="$OUT2"
+
+	local -a owners=("$user" "${orgs[@]}")
+
+	# Hack:
+	#  - GraphQL DOESN'T support providing ssh_url for a repo.
+	#  - So we must use REST API.
+	#  - Either we list all repos with heavy-weight REST API, or
+	#  - as we choose to do, we get ssh_url for one repo per endpoint,
+	#    and guess the ssh_url for all others.
+	local ssh_url_prefix="" ssh_url_suffix=""
+
+	local owner
+	for owner in "${owners[@]}"
+	do
+	    if [[ "$owner" =~ ' ' ]]
+	    then
+		Fail "The file format assumes owner '$owner' doesn't " \
+		     "doesn't contains space"
+	    fi
+
+	    GetRepos "$endpoint" "$owner"
+	    local -a repos=("${OUTA[@]}")
+
+	    if (( ${#repos[@]} == 0 ))
+	    then
+		# No point in proceeding
+		continue
+	    fi
+
+	    if test "$ssh_url_prefix" == ""
+	    then
+		local example_repo="${repos[0]}"
+		GetRest "$endpoint" "/repos/$owner/$example_repo"
+		local json="$OUT"
+
+		JqRaw .ssh_url "$json"
+		local ssh_url="$OUT"
+
+		# This is a terrible regex.
+		local regex="^(.*)$owner/$example_repo(.*)"
+		if ! Match "$regex" "$ssh_url" \
+		     ssh_url_prefix ssh_url_suffix
+		then
+		    Fail "Unexpected form of ssh_url doesn't match regex " \
+			 "'$regex': '$ssh_url'"
+		fi
+	    fi
+
+	    local repo
+	    for repo in "${repos[@]}"
+	    do
+		if [[ "$repo" =~ ' ' ]]
+		then
+		    Fail "The file format assumes repo '$repo' doesn't " \
+			 "doesn't contains space"
+		fi
+
+		local ssh_url="${ssh_url_prefix}$owner/$repo$ssh_url_suffix"
+
+		if [[ "$ssh_url" =~ ' ' ]]
+		then
+		    Fail "The file format assumes ssh_url '$ssh_url' doesn't " \
+			 "doesn't contains space"
+		fi
+
+		printf "%s %s %s %s\n" "$endpoint" "$owner" "$repo" "$ssh_url" \
+		       >> "$repos_workfile"
+	    done
+	done
+    done
+
+    mv "$repos_workfile" "$REPOS_FILE"
+}
+
+function GitHubInfoFromOrigin {
+    local remote_url
+    if ! remote_url=$(git remote get-url origin)
+    then
+	Fail "Failed to get origin remote URL"
+    fi
+
+    AssertReposFile
+
+    local endpoint="" owner="" repo="" ssh_url=""
+    while read -r endpoint owner repo ssh_url
+    do
+	if test "$ssh_url" == "$remote_url"
+	then
+	    OUT="$endpoint"
+	    OUT2="$owner"
+	    OUT3="$repo"
+	    OUT4="$ssh_url"
+	    return
+	fi
+    done < "$REPOS_FILE"
+
+    Fail "Failed to find any repositories matching current git repo"
+}	    
+
+function gh_rest {
+    if (( $# < 2 ))
+    then
+	UsageError rest "Takes at least 2 arguments"
+    fi
+
+    local endpoint="$1"
+    local path="$2"
+    shift 2
+
+    GetRest "$endpoint" "$path" "$@"
+    printf "%s\n" "$OUT"
+}
+
+function AssertReposFile {
+    if ! test -r "$REPOS_FILE"
+    then
+	Fail "Repository summary file not generated, please run " \
+	     "'gh repos-refresh'"
+    fi
+}
+
+function gh_clone {
+    if (( $# != 1 ))
+    then
+	UsageError clone "Exactly one argument expected"
+    fi
+    local pattern="$1"
+
+    AssertReposFile
+
+    local -a matched_specs=()
+    local -a matched_lines=()
+    local endpoint owner repo ssh_url
+    while read -r endpoint owner repo ssh_url
+    do
+	local spec="$endpoint:$owner/$repo"
+	if [[ "$spec" =~ $pattern ]]
+	then
+	    matched_specs+=("$spec")
+	    matched_lines+=("$endpoint $owner $repo $ssh_url")
+	fi
+    done < "$REPOS_FILE"
+
+    local -i num_matches="${#matched_lines[@]}"
+    case "$num_matches" in
+	0)
+	    Fail "Pattern '$pattern' didn't match any 'owner/repositories', " \
+		 "see $REPOS_FILE for the list of all repositories"
+	    ;;
+	1) : ;;
+	*)
+	    local message=""
+	    local spec
+	    for spec in "${matched_specs[@]}"
+	    do
+		message+=$'\n'"$spec"
+	    done
+	    Fail "Too many repository specs matched '$pattern':$message"
+	    ;;
+    esac
+
+    read -r endpoint owner repo ssh_url <<< "${matched_lines[0]}"
+
+    Run git clone "$ssh_url" "$owner/$repo"
+}
+
+function GetBranch {
+    if ! OUT=$(git rev-parse --abbrev-ref HEAD)
+    then
+	Fail "Failed to get branch with 'git rev-parse --abbrev-ref HEAD'"
+    fi
+}
+
+function gh_info {
+    GitHubInfoFromOrigin
+    local endpoint="$OUT"
+    local owner="$OUT2"
+    local repo="$OUT3"
+    local ssh_url="$OUT4"
+
+    echo "Remote origin: $ssh_url"
+
+    GetBranch
+    echo "Branch: $OUT"
+
+    Stage
+    Run git status --short
+}
+
+function GetGitRootRelative {
+    local out
+    if ! out=$(git rev-parse --show-cdup 2>&1)
+    then
+	Fail "Not in a git repository? 'git rev-parse --show-cdup' failed: $out"
+    fi
+
+    # If PWD is in root, out is empty.
+    local root="${out%/}"
+    if ((${#root} == 0))
+    then
+        root=.
+    fi
+
+    if ! [ -d "$root" ]
+    then
+        Fail "Failed to find root, '$root' not a directory"
+    fi
+
+    OUT="$root"
+}
+
+function Stage {
+    GetGitRootRelative
+    local root="$OUT"
+
+    local -a root_args=()
+    if [ "$root" == . ]
+    then
+        # TODO: Shouldn't this be (.) ?
+        root_args=()
+    elif [[ "$root" =~ ^- ]]
+    then
+        root_args=(-- "$root")
+    else
+        root_args=("$root")
+    fi
+
+    Run git reset --quiet "${root_args[@]}"
+    Run git add --all "${root_args[@]}"
+}
+
+function IsClean {
+    CaptureStd git status --short
+    if test "$OUT" == ""
+    then
+	return 0
+    else
+	return 1
+    fi
+}
+
+function GetPullRequestNumber {
+    local endpoint="$1"
+    local owner="$2"
+    local repo="$3"
+    local branch="$4"
+
+    ToJsonString "$owner"
+    local owner_json="$OUT"
+    ToJsonString "$repo"
+    local repo_json="$OUT"
+    ToJsonString "$branch"
+    local branch_json="$OUT"
+
+    local query="
+query {
+  repository(owner:$owner_json name: $repo_json) {
+    pullRequests(first:1 headRefName: $branch_json) {
+      pageInfo {
+        hasNextPage
+      }
+      nodes {
+        number
+        url
+      }
+    }
+  }
+}"
+    
+    QueryGraph "$endpoint" "$query"
+    local json="$OUT"
+
+    JqRaw ".data.repository.pullRequests.pageInfo.hasNextPage" "$json"
+    case "$OUT" in
+	false) : ;;
+	true) Fail "More than one pull requests are open for current branch" ;;
+	*) Fail "Failed to get pull request list: '$json'" ;;
+    esac
+
+    Jq ".data.repository.pullRequests.nodes | length" "$json"
+    case "$OUT" in
+	0) return 1 ;;
+	1) : ;;
+	*) Fail "Failed to get pull request list: '$json'" ;;
+    esac
+
+    JqRaw ".data.repository.pullRequests.nodes[].number" "$json"
+    local number="$OUT"
+
+    if test "$number" == ""
+    then
+	return 1
+    elif ! [[ "$number" =~ ^[0-9]+$ ]]
+    then
+	Fail "Failed to get pull request number: '$json'"
+    fi
+
+    JqRaw ".data.repository.pullRequests.nodes[].url" "$json"
+    local url="$OUT"
+
+    if ! [[ "$url" =~ ^http ]]
+    then
+	Fail "Failed to get pull request URL: '$json'"
+    fi
+
+    OUT="$number"
+    OUT2="$url"
+}
+
+function RawCreatePullRequest {
+    local destination="$1"
+    local owner="$2"
+    local repo="$3"
+    ToJsonString "$4"
+    local branch_to_review="$OUT"
+    ToJsonString "$5"
+    local merge_branch="$OUT"
+    ToJsonString "$6"
+    local title="$OUT"
+    ToJsonString "$7"
+    local body="$OUT"
+
+    local data="{
+  \"head\": $branch_to_review,
+  \"base\": $merge_branch,
+  \"title\": $title,
+  \"body\": $body
+}"
+
+    PostRest "$endpoint" "/repos/$owner/$repo/pulls" -d "$data"
+    local json="$OUT"
+
+    Jq .number "$json"
+    local number="$OUT"
+
+    JqRaw .html_url "$json"
+    local url="$OUT"
+
+    OUT="$number"
+    OUT2="$url"
+}
+
+function CreatePullRequest {
+    local endpoint="$1"
+    local owner="$2"
+    local repo="$3"
+    local branch="$4"
+
+    local destination_branch="master"
+
+    # TODO: If more than 1 commit ahead of origin/master, we should open an
+    # editor to specify title and body.
+
+    local title
+    title=$(git log -1 --format=%s HEAD)
+
+    local body
+    body=$(git log -1 --format=%b HEAD)
+    if [[ "$body" =~ ^[' '$'\n'$'\r']+$ ]]
+    then
+	body=""
+    fi
+
+    RawCreatePullRequest "$destination" "$owner" "$repo" "$branch" \
+			 "$destination_branch" "$title" "$body"
+    # Pass through output variables
+}
+
+function gh_checkin {
+    local title=""
+    if (( $# > 0 ))
+    then
+	title="$1"
+	shift
+    fi
+
+    if (( $# > 0 ))
+    then
+	UsageError checkin "Too many arguments"
+    fi
+
+    GitHubInfoFromOrigin
+    local endpoint="$OUT"
+    local owner="$OUT2"
+    local repo="$OUT3"
+    local ssh_url="$OUT4"
+
+    ResolveEndpoint "$endpoint"
+    local rest_url="$OUT"
+    local user="$OUT2"
+    local token="$OUT3"
+    local graphql_url="$OUT4"
+    local checks=("${OUTA[@]}")
+
+    Stage
+
+    local is_clean=""
+
+    GetBranch
+    local branch="$OUT"
+
+    if test "$branch" == master
+    then
+	if IsClean
+	then
+	    Fail "On master branch, and there's nothing to commit"
+	fi
+	is_clean=false
+
+	branch="${title,,}"
+	branch=$(printf "%s" "$branch" | tr ' ' - | tr -Cd '[[:alnum:]-]')
+	if test "$branch" == ""
+	then
+	    Fail "Failed to find a good branch name from the title '$title'"
+	fi
+	branch="$user/$branch"
+
+	git stash save --quiet
+	git checkout --quiet -b "$branch"
+	git stash pop --quiet
+    fi
+
+    if test "$is_clean" == false || ! IsClean
+    then
+	local -a args=()
+	if test "$title" != ""
+	then
+	    args+=(-m "$title")
+	fi
+
+        git commit --quiet "${args[@]}"
+    fi
+    
+    git push --quiet origin "$branch"
+
+    if GetPullRequestNumber "$endpoint" "$owner" "$repo" "$branch"
+    then
+	local number="$OUT"
+	local url="$OUT2"
+	echo "Found pull request $url"
+    else
+	CreatePullRequest "$endpoint" "$owner" "$repo" "$branch"
+	local number="$OUT"
+	local url="$OUT2"
+	echo "Created pull request $url"
+    fi
+}
+
+function Main {
+    if (( $# == 0 ))
+    then
+	UsageError '' "No command given"
+    fi
+
+    local command="$1"
+    shift
+
+    # TODO: Require jq
+    # TODO: Implement the following commands:
+    #  - co
+    #  - i (consolidate with gh_info), including staging.
+
+    local -A commands=(
+	# Official commands
+	[checkin]=gh_checkin
+	[ci]=gh_checkin
+	[clone]=gh_clone
+	[help]=Usage
+	[i]=gh_info
+	[info]=gh_info
+	[refresh]=gh_refresh
+
+	# Experimental/debug commands
+	[orgs]=gh_orgs
+	[repos]=gh_repos
+	[rest]=gh_rest
+    )
+
+    local func="${commands[$command]}"
+    if test "$func" == ""
+    then
+	UsageError '' "No such command '$command'"
+    fi
+
+    "$func" "$@"
+}
+
+Main "$@"
