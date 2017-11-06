@@ -1065,7 +1065,18 @@ function gh_update {
 
 function gh_diff {
     Stage
-    git diff HEAD
+
+    if (( $# == 0 ))
+    then
+	git diff HEAD
+    else
+	git diff "$@"
+    fi
+}
+
+function gh_head {
+    gh_checkout master
+    gh_update
 }
 
 function Main {
@@ -1095,6 +1106,7 @@ function Main {
 	[co]=gh_checkout
 	[di]=gh_diff
 	[diff]=gh_diff
+	[head]=gh_head
 	[i]=gh_info
 	[info]=gh_info
 	[undo]=gh_undo
