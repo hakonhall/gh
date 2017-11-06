@@ -872,10 +872,16 @@ function RawCreatePullRequest {
 }"
 
     PostRest "$endpoint" "/repos/$owner/$repo/pulls" -d "$data"
-    local out="$OUT"
+    local json="$OUT"
 
-    Jq .number "$out"
-    # Pass-through OUT
+    Jq .number "$json"
+    local number="$OUT"
+
+    JqRaw .html_url "$json"
+    local url="$OUT"
+
+    OUT="$number"
+    OUT2="$url"
 }
 
 function CreatePullRequest {
@@ -901,6 +907,7 @@ function CreatePullRequest {
 
     RawCreatePullRequest "$destination" "$owner" "$repo" "$branch" \
 			 "$destination_branch" "$title" "$body"
+    # Pass through output variables
 }
 
 function gh_checkin {
@@ -978,7 +985,8 @@ function gh_checkin {
     else
 	CreatePullRequest "$endpoint" "$owner" "$repo" "$branch"
 	local number="$OUT"
-	echo "Created pull request https://$server/$org/$repo/pull/$number"
+	local url="$OUT2"
+	echo "Created pull request $url"
     fi
 }
 
