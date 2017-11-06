@@ -828,7 +828,7 @@ query {
 	*) Fail "Failed to get pull request list: '$json'" ;;
     esac
 
-    Jq ".data.repository.pullRequests.nodes[].number" "$json"
+    JqRaw ".data.repository.pullRequests.nodes[].number" "$json"
     local number="$OUT"
 
     if test "$number" == ""
@@ -839,7 +839,7 @@ query {
 	Fail "Failed to get pull request number: '$json'"
     fi
 
-    Jq ".data.repository.pullRequests.nodes[].url" "$json"
+    JqRaw ".data.repository.pullRequests.nodes[].url" "$json"
     local url="$OUT"
 
     if ! [[ "$url" =~ ^http ]]
