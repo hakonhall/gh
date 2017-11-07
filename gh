@@ -951,7 +951,7 @@ function gh_checkin {
     local user="$OUT2"
     local token="$OUT3"
     local graphql_url="$OUT4"
-    local checks=("${OUTA[@]}")
+    local -a checks=("${OUTA[@]}")
 
     local is_clean=""
 
@@ -1079,6 +1079,363 @@ function gh_head {
     gh_update
 }
 
+function PullRequestExists {
+    local endpoint="$1"
+    local owner="$2"
+    local repo="$3"
+    local number="$4"
+    
+    ToJsonString "$owner"
+    local owner_json="$OUT"
+
+    ToJsonString "$repo"
+    local repo_json="$OUT"
+
+    local query="query {
+  repository(owner:$owner_json name:$repo_json) {
+    pullRequest(number:$number) {
+      url
+    }
+  }
+}"
+
+    QueryGraph "$endpoint" "$query"
+    local json="$OUT"
+
+    JqRaw ".data.repository.pullRequest.url" "$json"
+    local canonical_url="$OUT"
+
+    if test "$canonical_url" == null
+    then
+	return 1
+    elif test "$canonical_url" == "$url"
+    then
+	return 0
+    else
+	Fail "Found different url '$canonical_url' for endpoint '$endpoint'"
+    fi
+}
+
+function FindEndpointIfPullRequestUrl {
+    local url="$1"
+
+    if ! [[ "$url" =~ ^https://([a-zA-Z0-9._-]+)(/[^?#]+)?/([^/]+)/([^/]+)/pull/([0-9]+)$ ]]
+    then
+	return 1
+    fi
+
+    local authority="${BASH_REMATCH[1]}"
+    local owner="${BASH_REMATCH[3]}"
+    local repo="${BASH_REMATCH[4]}"
+    local number="${BASH_REMATCH[5]}"
+
+    ToJsonString "$owner"
+    local owner_json="$OUT"
+
+    ToJsonString "$repo"
+    local repo_json="$OUT"
+
+    local query="query {
+  repository(owner:$owner_json name:$repo_json) {
+    pullRequest(number:$number) {
+      url
+    }
+  }
+}"
+
+    GetEndpoints
+    local -a endpoints=("${OUTA[@]}")
+    
+    local endpoint
+    for endpoint in "${endpoints[@]}"
+    do
+	if PullRequestExists "$endpoint" "$owner" "$repo" "$number"
+	then
+	    OUT="$endpoint"
+	    OUT2="$owner"
+	    OUT3="$repo"
+	    OUT4="$number"
+	    return 0
+	fi
+    done
+
+    Fail "No endpoint owns '$url'"
+}
+
+function GetChecksFor {
+    local endpoint="$1"
+    local owner="$2"
+    local repo="$3"
+
+    local -a checks=()
+
+    ReadConfigAsString
+    local json="$OUT"
+
+    ToJsonString "$endpoint"
+    local name_json="$OUT"
+
+    Jq ".endpoints[] | select(.name == $name_json)" "$json"
+    json="$OUT"
+
+    if test "$json" != ""
+    then
+	JqRawLines ".checks[]" "$json"
+	checks=("${OUTA[@]}")
+    fi
+
+    OUTA=("${checks[@]}")
+}
+
+function CheckStatus {
+    local endpoint="$1"
+    local owner="$2"
+    local repo="$3"
+    local number="$4"
+
+    ToJsonString "$owner"
+    local owner_json="$OUT"
+
+    ToJsonString "$repo"
+    local repo_json="$OUT"
+
+    local query="query {
+  repository(owner:$owner_json name:$repo_json) {
+    pullRequest(number:$number) {
+      state
+      merged
+      mergeable
+      headRef {
+        name
+      }
+      commits(last: 1) {
+        nodes {
+          commit {
+            oid
+            status {
+              state
+              contexts {
+                context
+                description
+                state
+                targetUrl
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}"
+
+    QueryGraph "$endpoint" "$query"
+    local json="$OUT"
+
+    Jq ".data.repository.pullRequest" "$json"
+    json="$OUT"
+
+    JqRaw ".state" "$json"
+    local state="$OUT"
+
+    case "$state" in
+	OPEN) : ;;
+	null)
+	    OUT="The state of the pull request is not yet known"
+	    return 1
+	    ;;
+	*) Fail "State is not OPEN: '$state'" ;;
+    esac
+
+    JqRaw ".merged" "$json"
+    local merged="$OUT"
+
+    case "$merged" in
+	false) : ;;
+	null)
+	    OUT="'merged' status not yet set"
+	    return 1
+	    ;;
+	true) Fail "Pull request has been merged" ;;
+	*) Fail "Unknown merged status '$merged'" ;;
+    esac
+
+    JqRaw ".mergeable" "$json"
+    local mergeable="$OUT"
+
+    case "$mergeable" in
+	MERGEABLE) : ;;
+	null)
+	    OUT="Checking whether pull request is mergeable"
+	    return 1
+	    ;;
+	*) Fail "Unknown mergeable status '$mergeable'" ;;
+    esac
+
+    JqRaw ".headRef.name" "$json"
+    local branch="$OUT"
+
+    case "$mergeable" in
+	MERGEABLE) : ;;
+	null)
+	    OUT="Checking whether pull request is mergeable"
+	    return 1
+	    ;;
+	*) Fail "Unknown mergeable status '$mergeable'" ;;
+    esac
+
+    Jq ".commits.nodes[].commit" "$json"
+    json="$OUT"
+
+    JqRawLines ".status.contexts[].context" "$json"
+    local -a checks=("${OUTA[@]}")
+
+    GetChecksFor "$endpoint" "$owner" "$repo"
+    local -a required_checks=("${OUTA[@]}")
+
+    local required_check=""
+    for required_check in "${required_checks[@]}"
+    do
+	local check_passes=false
+
+	local check=""
+	for check in "${checks[@]}"
+	do
+	    if [[ "$check" =~ $required_check ]]
+	    then
+		ToJsonString "$check"
+		local check_json="$OUT"
+
+		JqRaw ".status.contexts[] | select(.context == $check_json)" \
+		      "$json"
+		local context_json="$OUT"
+
+		JqRaw ".state" "$context_json"
+		local context_state="$OUT"
+
+		JqRaw ".description" "$context_json"
+		local description="$OUT"
+
+		JqRaw ".targetUrl" "$context_json"
+		local target_url="$OUT"
+
+		case "$context_state" in
+		    SUCCESS) : ;;
+		    null|PENDING)
+			OUT="Check not finished: $description"$'\n'
+			OUT+="See $target_url for details"
+			return 1
+			;;
+		    *) Fail "Bad check status: '$context_state'"
+		esac
+
+		check_passes=true
+		break
+	    fi
+	done
+
+	if ! $check_passes
+	then
+	    OUT="Waiting for check that matches '$required_check'"
+	    return 1
+	fi
+    done
+
+    JqRaw ".status.state" "$json"
+    local status_state="$OUT"
+
+    case "$status_state" in
+	SUCCESS) : ;;
+	null)
+	    OUT="Overall status not yet determined"
+	    return 1
+	    ;;
+	*) Fail "Bad overall check state: '$status_state'" ;;
+    esac
+
+    JqRaw ".oid" "$json"
+    local commit="$OUT"
+
+    OUT="$branch"
+    OUT2="$commit"
+}
+
+function WaitForChecks {
+    local endpoint="$1"
+    local owner="$2"
+    local repo="$3"
+    local number="$4"
+
+    if CheckStatus "$endpoint" "$owner" "$repo" "$number"
+    then
+	echo "branch: $OUT"
+	echo "commit: $OUT2"
+    else
+	echo "$OUT..."
+    fi
+
+    exit 4
+}
+
+function WaitForChecksThen {
+    local endpoint="$1"
+    local owner="$2"
+    local repo="$3"
+    local number="$4"
+
+    WaitForChecks "$endpoint" "$owner" "$repo" "$number"
+}
+
+function gh_wait {
+    local merge=false
+    while (($# > 0))
+    do
+	case "$1" in
+	    -m|--merge)
+		merge=true
+		shift
+		;;
+	    *)
+		break
+		;;
+	esac
+    done
+
+    local wrong_usage=true
+
+    if (( $# == 1 ))
+    then
+	# https://github.com/vespa-engine/vespa/pull/3937
+	if FindEndpointIfPullRequestUrl "$1"
+	then
+	    local endpoint="$OUT"
+	    local owner="$OUT2"
+	    local repo="$OUT3"
+	    local number="$OUT4"
+	    wrong_usage=false
+	elif [[ "$1" =~ ^[0-9]+$ ]]
+	then
+	    local number="$1"
+
+	    GitHubInfoFromOrigin
+	    local endpoint="$OUT"
+	    local owner="$OUT2"
+	    local repo="$OUT3"
+	    
+	    if PullRequestExists "$endpoint" "$owner" "$repo" "$number"
+	    then
+		wrong_usage=false
+	    fi
+	fi
+    fi
+
+    if $wrong_usage
+    then
+	UsageError "Failed to find pull request"
+    fi
+
+    WaitForChecksThen "$endpoint" "$owner" "$repo" "$number"
+}
+
 function Main {
     if (( $# == 0 ))
     then
@@ -1100,6 +1457,7 @@ function Main {
 	[clone]=gh_clone
 	[help]=Usage
 	[refresh]=gh_refresh
+	[wait]=gh_wait
 
 	# Unofficial commands
 	[checkout]=gh_checkout
