@@ -739,10 +739,17 @@ function gh_info {
     local repo="$OUT3"
     local ssh_url="$OUT4"
 
-    echo "origin: $ssh_url"
-
     GetBranch
-    echo "branch: $OUT"
+    local branch="$OUT"
+
+    if test "$branch" == master
+    then
+	local branch_text=""
+    else
+	local branch_text="#$branch"
+    fi
+
+    echo "$endpoint:$owner/$repo$branch_text"
 
     Stage
     Run git status --short
