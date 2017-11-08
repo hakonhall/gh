@@ -1252,7 +1252,7 @@ function CheckStatus {
     case "$merged" in
 	false) : ;;
 	null)
-	    OUT="'merged' status not yet set"
+	    OUT="Checking whether pull request has been merged"
 	    return 1
 	    ;;
 	true) Fail "Pull request has been merged" ;;
@@ -1265,7 +1265,7 @@ function CheckStatus {
     case "$mergeable" in
 	MERGEABLE) : ;;
 	null)
-	    OUT="Checking whether pull request is mergeable"
+	    OUT="Checking for ability to automatically merge"
 	    return 1
 	    ;;
 	*) Fail "Unknown mergeable status '$mergeable'" ;;
