@@ -205,11 +205,15 @@ function JqRawLines {
     local out="$OUT"
 
     local -a lines=()
-    while read -r
-    do
-	local line="$REPLY"
-	lines+=("$line")
-    done <<< "$out"
+
+    if test "$out" != ""
+    then
+	while read -r
+	do
+	    local line="$REPLY"
+	    lines+=("$line")
+	done <<< "$out"
+    fi
 
     OUTA=("${lines[@]}")
 }
@@ -273,9 +277,6 @@ function ResolveEndpoint {
 	     "'$token_regex' but is '$token'"
     fi
 
-    JqRawLines '.checks[]' "$json"
-    local -a checks=("${OUTA[@]}")
-
     if test "$api_authority" == api.github.com
     then
 	local rest_url="https://$api_authority"
@@ -290,7 +291,6 @@ function ResolveEndpoint {
     OUT2="$user"
     OUT3="$token"
     OUT4="$graphql_url"
-    OUTA=("${checks[@]}")
 }
 
 function Curl {
@@ -328,10 +328,7 @@ function Curl {
     MaybeEchoCommand "${command[@]}"
     if http_code=$("${command[@]}")
     then
-	if (( http_code < 200 || http_code >= 300 ))
-	then
-	    Fail "HTTP response code $http_code for command: ${command[*]}"
-	fi
+	:
     else
 	local -i status="$?"
 	local message="Curl failed with status $status"
@@ -359,7 +356,23 @@ function Curl {
 	Fail "$message"
     fi
 
-    OUT=$(< "$response_file")
+    if (( http_code < 200 || http_code >= 300 ))
+    then
+	Fail "HTTP response code $http_code for command: ${command[*]}"
+    fi
+
+    local response
+    if ! response=$(< "$response_file")
+    then
+	Fail "Failed to read '$response_file'"
+    fi
+
+    if ! jq . <<< "$response" &> /dev/null
+    then
+	Fail "Response is invalid JSON: '$response'"
+    fi
+
+    OUT="$response"
 }
 
 function CurlRest {
@@ -386,6 +399,14 @@ function PostRest {
     CurlRest "$@" -X POST 
 }
 
+function PutRest {
+    CurlRest "$@" -X PUT
+}
+
+function DeleteRest {
+    CurlRest "$@" -X DELETE
+}
+
 function QueryGraph {
     local endpoint="$1"
     local query="$2"
@@ -401,6 +422,48 @@ function QueryGraph {
     local graphql_url="$OUT4"
 
     Curl "$graphql_url" "$token" "$@" -X POST -d "$json"
+    # OUT="$response"
+}
+
+function QueryGraphList {
+    local endpoint="$1"
+    local query_prefix="$2"
+    local query_suffix="$3"
+    local jq_path="$4"
+    shift 4
+
+    local jq_nodes=""
+
+    local cursor_text=""
+    while true
+    do
+	local query="$query_prefix$cursor_text$query_suffix"
+	QueryGraph "$endpoint" "$query" "$@"
+	local response="$OUT"
+
+	Jq "$jq_path" "$response"
+	local graphql_array="$OUT"
+
+	Jq '.nodes[]' "$graphql_array"
+	jq_nodes+="$OUT"$'\n'
+
+	Jq .pageInfo.hasNextPage "$graphql_array"
+	local has_next_page="$OUT"
+	case "$has_next_page" in
+	    true) : ;;
+	    false) break ;;
+	    *)
+		Fail "Bad value of hasNextPage for GraphQL array " \
+		     "'$graphql_array'"
+		;;
+	esac
+
+	Jq .pageInfo.endCursor "$graphql_array"
+	local end_cursor_json="$OUT"
+	cursor_text=" after:$end_cursor_json"
+    done
+
+    OUT="$jq_nodes"
 }
 
 function GetOrgs {
@@ -935,12 +998,40 @@ function CreatePullRequest {
 }
 
 function gh_checkin {
-    local title=""
-    if (( $# > 0 ))
-    then
-	title="$1"
-	shift
-    fi
+    local approve=false assignee="" comment="" merge=false ptal=false title=""
+    while (( $# > 0 ))
+    do
+	case "$1" in
+	    -A|--approve|+1)
+		approve=true
+		shift
+		;;
+	    -a|--assignee)
+		assignee="$2"
+		shift 2
+		;;
+	    -c|--comment)
+		comment="$2"
+		shift 2
+		;;
+	    -m|--merge)
+		merge=true
+		shift
+		;;
+	    -p|--ptal)
+		ptal=true
+		shift
+		;;
+	    -t|--title)
+		title="$2"
+		shift 2
+		;;
+	    *)
+		title="$1"
+		shift
+		break
+	esac
+    done
 
     if (( $# > 0 ))
     then
@@ -958,7 +1049,6 @@ function gh_checkin {
     local user="$OUT2"
     local token="$OUT3"
     local graphql_url="$OUT4"
-    local -a checks=("${OUTA[@]}")
 
     local is_clean=""
 
@@ -1012,6 +1102,15 @@ function gh_checkin {
 	local url="$OUT2"
 	echo "Created pull request $url"
     fi
+
+    if test "$assignee" != ""
+    then
+	LookupAssignee "$endpoint" "$owner" "$repo" "$assignee"
+	assignee="$OUT"
+    fi
+
+    WaitForChecksThen "$endpoint" "$owner" "$repo" "$number" \
+		      "$approve" "$comment" "$assignee" "$merge" "$ptal"
 }
 
 function gh_undo {
@@ -1086,7 +1185,7 @@ function gh_head {
     gh_update
 }
 
-function PullRequestExists {
+function TryGetPullRequest {
     local endpoint="$1"
     local owner="$2"
     local repo="$3"
@@ -1101,6 +1200,25 @@ function PullRequestExists {
     local query="query {
   repository(owner:$owner_json name:$repo_json) {
     pullRequest(number:$number) {
+      assignees(first:100) {
+        nodes {
+          login
+        }
+      }
+      comments(last:1) {
+        pageInfo {
+          endCursor
+        }
+      }
+      headRef {
+        name
+        target {
+          oid
+        }
+      }
+      mergeable
+      merged
+      state
       url
     }
   }
@@ -1109,24 +1227,68 @@ function PullRequestExists {
     QueryGraph "$endpoint" "$query"
     local json="$OUT"
 
-    JqRaw ".data.repository.pullRequest.url" "$json"
-    local canonical_url="$OUT"
-
-    if test "$canonical_url" == null
+    Jq ".data.repository.pullRequest" "$json"
+    if test "$OUT" == null
     then
 	return 1
-    elif test "$canonical_url" == "$url"
+    fi
+
+    JqRaw ".data.repository.pullRequest.headRef.name" "$json"
+    local branch="$OUT"
+    if ! [[ "$branch" =~ ^[a-zA-Z0-9_/-]+$ ]]
     then
-	return 0
-    else
-	Fail "Found different url '$canonical_url' for endpoint '$endpoint'"
+	Fail "Unexpected name of branch: '$branch'"
+    fi
+
+    JqRaw ".data.repository.pullRequest.headRef.target.oid" "$json"
+    local head_commit="$OUT"
+    if ! [[ "$head_commit" =~ ^[a-f0-9]{40}$ ]]
+    then
+	Fail "Unexpected format of head commit: '$head_commit'"
+    fi
+
+    JqRaw ".data.repository.pullRequest.url" "$json"
+    local url="$OUT"
+    if ! [[ "$url" =~ ^http ]]
+    then
+	Fail "Unexpected format of pull request URL: '$url'"
+    fi
+
+    Jq ".data.repository.pullRequest.comments" "$json"
+    local last_comments_id="$OUT"
+    if test "$last_comments_id" != null
+    then
+	JqRaw ".data.repository.pullRequest.comments.pageInfo.endCursor" "$json"
+	last_comment_id="$OUT"
+    fi
+
+    JqRawLines ".data.repository.pullRequest.assignees.nodes[].login" "$json"
+    local -a assignees=("${OUTA[@]}")
+
+    OUT="$branch"
+    OUT2="$head_commit"
+    OUT3="$url"
+    OUT4="$last_comment_id"
+    OUTA=("${assignees[@]}")
+}
+
+function GetPullRequest {
+    local endpoint="$1"
+    local owner="$2"
+    local repo="$3"
+    local number="$4"
+
+    if ! TryGetPullRequest "$@"
+    then
+	Fail "There is no pull request $number at $endpoint:$owner/$repo"
     fi
 }
 
 function FindEndpointIfPullRequestUrl {
     local url="$1"
 
-    if ! [[ "$url" =~ ^https://([a-zA-Z0-9._-]+)(/[^?#]+)?/([^/]+)/([^/]+)/pull/([0-9]+)$ ]]
+    # Example: https://github.com/vespa-engine/vespa/pull/3937
+    if ! [[ "$url" =~ ^https://([a-zA-Z0-9.-]+)(/[^?#]+)?/([^/]+)/([^/]+)/pull/([0-9]+)$ ]]
     then
 	return 1
     fi
@@ -1156,8 +1318,15 @@ function FindEndpointIfPullRequestUrl {
     local endpoint
     for endpoint in "${endpoints[@]}"
     do
-	if PullRequestExists "$endpoint" "$owner" "$repo" "$number"
+	if TryGetPullRequest "$endpoint" "$owner" "$repo" "$number"
 	then
+	    local canonical_url="$OUT3"
+	    if test "$url" != "$canonical_url"
+	    then
+		Fail "URL '$url' does not match pull request url " \
+		     "'$canonical_url'"
+	    fi
+
 	    OUT="$endpoint"
 	    OUT2="$owner"
 	    OUT3="$repo"
@@ -1166,7 +1335,7 @@ function FindEndpointIfPullRequestUrl {
 	fi
     done
 
-    Fail "No endpoint owns '$url'"
+    Fail "No endpoint in config file '$CONFIG_FILE' owns '$url'"
 }
 
 function GetChecksFor {
@@ -1174,21 +1343,75 @@ function GetChecksFor {
     local owner="$2"
     local repo="$3"
 
-    local -a checks=()
-
     ReadConfigAsString
-    local json="$OUT"
+    local config_json="$OUT"
 
     ToJsonString "$endpoint"
-    local name_json="$OUT"
+    local endpoint_json="$OUT"
 
-    Jq ".endpoints[] | select(.name == $name_json)" "$json"
-    json="$OUT"
+    Jq ".endpoints[] | select(.name == $endpoint_json)" "$config_json"
+    local selected_endpoint_json="$OUT"
 
-    if test "$json" != ""
+    if test "$selected_endpoint_json" == ""
     then
-	JqRawLines ".checks[]" "$json"
-	checks=("${OUTA[@]}")
+	Fail "There's no specification of '$endpoint' in '$CONFIG_FILE'"
+    fi
+
+    local -a checks=()
+
+    Jq ".checks" "$selected_endpoint_json"
+    local endpoint_checks_string="$OUT"
+    if test "$endpoint_checks_string" != null
+    then
+	Jq .checks "$selected_endpoint_json"
+	if test "$OUT" != null
+	then
+	    JqRawLines ".checks[]" "$selected_endpoint_json"
+	    checks=("${OUTA[@]}")
+	fi
+    fi
+
+    ToJsonString "$owner"
+    local owner_json="$OUT"
+
+    Jq .owners "$selected_endpoint_json"
+    if test "$OUT" != null
+    then
+	Jq ".owners[] | select(.name == $owner_json)" "$selected_endpoint_json"
+	local selected_owner_json="$OUT"
+	if test "$selected_owner_json" != ""
+	then
+	    Jq ".checks" "$selected_owner_json"
+	    local owner_checks_string="$OUT"
+	    if test "$owner_checks_string" != null
+	    then
+		Jq .checks "$selected_owner_json"
+		if test "$OUT" != ""
+		then
+		    JqRawLines ".checks[]" "$selected_owner_json"
+		    checks=("${OUTA[@]}")
+		fi
+	    fi
+
+	    ToJsonString "$repo"
+	    local repo_json="$OUT"
+
+	    Jq .repos "$selected_owner_json"
+	    if test "$OUT" != null
+	    then
+		Jq ".repos[] | select(.name == $repo_json)" "$selected_owner_json"
+		local selected_repo_json="$OUT"
+		if test "$selected_repo_json" != ""
+		then
+		    Jq ".checks" "$selected_repo_json"
+		    if test "$OUT" != null
+		    then
+			JqRawLines ".checks[]" "$selected_repo_json"
+			checks=("${OUTA[@]}")
+		    fi
+		fi
+	    fi
+	fi
     fi
 
     OUTA=("${checks[@]}")
@@ -1199,6 +1422,8 @@ function CheckStatus {
     local owner="$2"
     local repo="$3"
     local number="$4"
+    local commit="$5"
+    local last_comment_id="$6"
 
     ToJsonString "$owner"
     local owner_json="$OUT"
@@ -1209,6 +1434,11 @@ function CheckStatus {
     local query="query {
   repository(owner:$owner_json name:$repo_json) {
     pullRequest(number:$number) {
+      comments(last:1) {
+        pageInfo {
+          endCursor
+        }
+      }
       state
       merged
       mergeable
@@ -1271,6 +1501,9 @@ function CheckStatus {
 
     case "$mergeable" in
 	MERGEABLE) : ;;
+	CONFLICTING)
+	    Fail "Pull requests is conflicting with origin/master"
+	    ;;
 	null)
 	    OUT="Checking for ability to automatically merge"
 	    return 1
@@ -1281,20 +1514,30 @@ function CheckStatus {
     JqRaw ".headRef.name" "$json"
     local branch="$OUT"
 
-    case "$mergeable" in
-	MERGEABLE) : ;;
-	null)
-	    OUT="Checking whether pull request is mergeable"
-	    return 1
-	    ;;
-	*) Fail "Unknown mergeable status '$mergeable'" ;;
-    esac
+    Jq ".comments" "$json"
+    local current_last_comment_id="$OUT"
+    if test "$current_last_comments_id" != null
+    then
+	JqRaw ".comments.pageInfo.endCursor" "$json"
+	current_last_comment_id="$OUT"
+    fi
+    if test "$current_last_comment_id" != "$last_comment_id"
+    then
+	Fail "Comments have been added, aborting status check"
+    fi
 
     Jq ".commits.nodes[].commit" "$json"
     json="$OUT"
 
-    JqRawLines ".status.contexts[].context" "$json"
-    local -a checks=("${OUTA[@]}")
+    Jq ".status" "$json"
+    local status="$OUT"
+    if test "$status" == "null"
+    then
+	local -a checks=()
+    else
+	JqRawLines ".status.contexts[].context" "$json"
+	local -a checks=("${OUTA[@]}")
+    fi
 
     GetChecksFor "$endpoint" "$owner" "$repo"
     local -a required_checks=("${OUTA[@]}")
@@ -1342,7 +1585,7 @@ function CheckStatus {
 
 	if ! $check_passes
 	then
-	    OUT="Waiting for check that matches '$required_check'"
+	    OUT="Waiting for check matching '$required_check'"
 	    return 1
 	fi
     done
@@ -1353,17 +1596,23 @@ function CheckStatus {
     case "$status_state" in
 	SUCCESS) : ;;
 	null)
-	    OUT="Overall status not yet determined"
-	    return 1
+	    # If there are no required checks, status may be null.
+	    if (( ${#required_checks[@]} > 0 ))
+	    then
+		OUT="Overall status not yet determined"
+		return 1
+	    fi
 	    ;;
 	*) Fail "Bad overall check state: '$status_state'" ;;
     esac
 
     JqRaw ".oid" "$json"
-    local commit="$OUT"
+    local head_commit="$OUT"
 
-    OUT="$branch"
-    OUT2="$commit"
+    if test "$head_commit" != "$commit"
+    then
+	Fail "Additional commits have been added, refusing to continue"
+    fi
 }
 
 function WaitForChecks {
@@ -1371,16 +1620,105 @@ function WaitForChecks {
     local owner="$2"
     local repo="$3"
     local number="$4"
+    local commit="$5"
+    local last_comment_id="$6"
 
-    if CheckStatus "$endpoint" "$owner" "$repo" "$number"
+    while ! CheckStatus "$endpoint" "$owner" "$repo" "$number" "$commit" \
+	    "$last_comment_id"
+    do
+	Fail "Not implemented... OUT='$OUT'"
+    done
+
+    echo "All checks pass"
+}
+
+function AssignPullRequest {
+    endpoint="$1"
+    owner="$2"
+    repo="$3"
+    number="$4"
+    assignee="$5"
+
+    ToJsonString "$assignee"
+    local assignee_json="$OUT"
+    local data="{\"assignees\": [ $assignee_json ]}"
+
+    local path="/repos/$owner/$repo/issues/$number/assignees"
+    PostRest "$endpoint" "$path" -d "$data"
+
+    # Unfortunately, even if assignee is bogus, the POST returns 201 OK.  The
+    # assignee list will not be updated, so the only way to check is if
+    # assignee is in $out, or do an explicit check on whether assignee is
+    # assigned. We'll just assume it's OK. But we also verify the assignee is
+    # valid before the POST.
+}
+
+function AddPullRequestComment {
+    local endpoint="$1"
+    local owner="$2"
+    local repo="$3"
+    local number="$4"
+    local comment="$5"
+
+    ToJsonString "$comment"
+    local comment_json="$OUT"
+    local data="{\"body\": $comment_json }"
+
+    local path="/repos/$owner/$repo/issues/$number/comments"
+    PostRest "$endpoint" "$path" -d "$data"
+}
+
+function Ptal {
+    local endpoint="$1"
+    local owner="$2"
+    local repo="$3"
+    local number="$4"
+    shift 4
+    local -a assignees=("$@")
+
+    if (( ${#assignees[@]} == 0 ))
     then
-	echo "branch: $OUT"
-	echo "commit: $OUT2"
-    else
-	echo "$OUT..."
+	Fail "There are no assignees to ask for PTAL"
     fi
 
-    exit 4
+    local comment="Please take another look"
+    local assignee
+    for assignee in "${assignees[@]}"
+    do
+	comment+=" @$assignee"
+    done
+
+    AddPullRequestComment "$endpoint" "$owner" "$repo" "$number" "$comment"
+}
+
+function ApprovePullRequest {
+    endpoint="$1"
+    owner="$2"
+    repo="$3"
+    number="$4"
+    commit="$5"
+
+    local data="{\"commit_id\": \"$commit\", \"event\": \"APPROVE\"}"
+    PostRest "$endpoint" "/repos/$owner/$repo/pulls/$number/reviews" -d "$data"
+}
+
+function MergePullRequest {
+    local endpoint="$1"
+    local owner="$2"
+    local repo="$3"
+    local number="$4"
+    local commit="$5"
+
+    if ! [[ "$number" =~ ^[0-9]+$ ]]
+    then
+	Fail "Bad PR number: '$pr_number'"
+    elif ! [[ "$commit" =~ ^[0-9a-f]{40}$ ]]
+    then
+	Fail "Bad HEAD commit: '$commit'"
+    fi
+
+    PutRest "$endpoint" "/repos/$owner/$repo/pulls/$number/merge" \
+	    -d "{ \"sha\": \"$commit\" }"
 }
 
 function WaitForChecksThen {
@@ -1389,16 +1727,180 @@ function WaitForChecksThen {
     local repo="$3"
     local number="$4"
 
-    WaitForChecks "$endpoint" "$owner" "$repo" "$number"
+    local approve="$5"
+    local comment="$6"
+    local assignee="$7"
+    local merge="$8"
+    local ptal="$9"
+
+    GetPullRequest "$endpoint" "$owner" "$repo" "$number"
+    local branch="$OUT"
+    local commit="$OUT2"
+    local last_comment_id="$OUT4"
+    local -a assignees=("${OUTA[@]}")
+
+    WaitForChecks "$endpoint" "$owner" "$repo" "$number" "$commit" \
+		  "$last_comment_id"
+
+    if test "$assignee" != ""
+    then
+	AssignPullRequest "$endpoint" "$owner" "$repo" "$number" "$assignee"
+	echo "$assignee assigned to PR"
+    fi
+
+    if test "$comment" != ""
+    then
+	AddPullRequestComment "$endpoint" "$owner" "$repo" "$number" "$comment"
+    fi
+
+    if $ptal
+    then
+	# Printing happens in function
+	Ptal "$endpoint" "$owner" "$repo" "$number" "${assignees[@]}"
+	echo "Asked for PTAL from: ${assignees[*]}"
+    fi
+
+    if $approve
+    then
+	ApprovePullRequest "$endpoint" "$owner" "$repo" "$number" "$commit"
+	echo "Pull request approved"
+    fi
+
+    if $merge
+    then
+	MergePullRequest "$endpoint" "$owner" "$repo" "$number" "$commit"
+	echo "Pull request merged"
+
+	DeleteRest "$endpoint" "/repos/$owner/$repo/git/refs/heads/$branch"
+	echo "Branch deleted"
+    fi
+}
+
+function GetMentionableUsers {
+    local endpoint="$1"
+    local owner="$2"
+    local repo="$3"
+
+    ToJsonString "$owner"
+    local owner_json="$OUT"
+
+    ToJsonString "$repo"
+    local repo_json="$OUT"
+
+    local query_prefix="query {
+  repository(owner:$owner_json name:$repo_json) {
+    mentionableUsers(first:100"
+
+    local query_suffix=") {
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+      nodes {
+        login
+        name
+      }
+    }
+  }
+}"
+
+    QueryGraphList "$endpoint" "$query_prefix" "$query_suffix" \
+		   ".data.repository.mentionableUsers"
+    local mentionable_users="$OUT"
+
+    # mentionable_users='{"login":"x1","name":"y1 z1"}
+    # {"login":"x2","name":"y2 z2"}
+    # ...
+    # '
+    OUT="$mentionable_users"
+}
+
+function LookupAssignee {
+    local endpoint="$1"
+    local owner="$2"
+    local repo="$3"
+    local assignee="$4"
+
+    if test "$assignee" == ""
+    then
+	Fail "Assignee cannot be empty"
+    fi
+
+    GetMentionableUsers "$endpoint" "$owner" "$repo"
+    local users_arrayish="$OUT"
+
+    ToJsonString "$assignee"
+    local assignee_json="$OUT"
+
+    JqRawLines "select(.login == $assignee_json) | .login" "$users_arrayish"
+    local -a matches=("${OUTA[@]}")
+
+    case "${#matches[@]}" in
+	0)
+	    Jq "select(.name != null) | select(.name | test($assignee_json; \"i\"))" "$users_arrayish"
+	    local result="$OUT"
+	    
+	    JqRawLines ".login" "$result"
+	    matches=("${OUTA[@]}")
+
+	    case "${#matches[@]}" in
+		0) Fail "No assignee found with login '$assignee' nor " \
+			"name matching '$assignee'" ;;
+		1)
+		    local login="${matches[0]}"
+
+		    JqRaw ".name" "$result"
+		    local name="$OUT"
+		    
+		    read -n1 -p "Found '$name' ($login) matching '$assignee', ok? [Y/n] "
+		    if test "$REPLY" != ""
+		    then
+			echo
+			if test "$REPLY" != y
+			then
+			    exit 1
+			fi
+		    fi
+	    	    ;;
+		*) Fail "Found several assignees with names matching " \
+			"'$assignee': ${matches[*]}" ;;
+	    esac
+	    ;;
+	1) local login="${matches[0]}" ;;
+	*) Fail "Found several assignees with login '$assignees'!?" ;;
+    esac
+
+    if ! [[ "$login" =~ ^[a-z]+$ ]]
+    then
+	Fail "Bad login name '$login' found for assignee '$assignee'"
+    fi
+
+    OUT="$login"
 }
 
 function gh_wait {
-    local merge=false
+    local assignee= approve=false comment= merge=false ptal=false
     while (($# > 0))
     do
 	case "$1" in
+	    -A|--approve|+1|--lgtm)
+		approve=true
+		shift
+		;;
+	    -a|--assignee)
+		assignee="$2"
+		shift 2
+		;;
+	    -c|--comment)
+		comment="$2"
+		shift 2
+		;;
 	    -m|--merge)
 		merge=true
+		shift
+		;;
+	    -p|--ptal)
+		ptal=true
 		shift
 		;;
 	    *)
@@ -1409,17 +1911,28 @@ function gh_wait {
 
     local wrong_usage=true
 
-    if (( $# == 1 ))
+    if (( $# == 0 ))
     then
-	# https://github.com/vespa-engine/vespa/pull/3937
-	if FindEndpointIfPullRequestUrl "$1"
+	GitHubInfoFromOrigin
+	local endpoint="$OUT"
+	local owner="$OUT2"
+	local repo="$OUT3"
+
+	GetBranch
+	local branch="$OUT"
+
+	if ! GetPullRequestNumber "$endpoint" "$owner" "$repo" "$branch"
 	then
-	    local endpoint="$OUT"
-	    local owner="$OUT2"
-	    local repo="$OUT3"
-	    local number="$OUT4"
-	    wrong_usage=false
-	elif [[ "$1" =~ ^[0-9]+$ ]]
+	    Fail "There's no pull request associated with working directory"
+	fi
+	local number="$OUT"
+	local url="$OUT2"
+
+	wrong_usage=false
+	echo "Found pull request $url"
+    elif (( $# == 1 ))
+    then
+	if [[ "$1" =~ ^[0-9]+$ ]]
 	then
 	    local number="$1"
 
@@ -1428,19 +1941,33 @@ function gh_wait {
 	    local owner="$OUT2"
 	    local repo="$OUT3"
 	    
-	    if PullRequestExists "$endpoint" "$owner" "$repo" "$number"
+	    if TryGetPullRequest "$endpoint" "$owner" "$repo" "$number"
 	    then
 		wrong_usage=false
 	    fi
+	elif FindEndpointIfPullRequestUrl "$1"
+	then
+	    local endpoint="$OUT"
+	    local owner="$OUT2"
+	    local repo="$OUT3"
+	    local number="$OUT4"
+	    wrong_usage=false
 	fi
     fi
 
     if $wrong_usage
     then
-	UsageError "Failed to find pull request"
+	UsageError "Please specify which pull request to wait for"
     fi
 
-    WaitForChecksThen "$endpoint" "$owner" "$repo" "$number"
+    if test "$assignee" != ""
+    then
+	LookupAssignee "$endpoint" "$owner" "$repo" "$assignee"
+	assignee="$OUT"
+    fi
+
+    WaitForChecksThen "$endpoint" "$owner" "$repo" "$number" \
+		      "$approve" "$comment" "$assignee" "$merge" "$ptal"
 }
 
 function Main {
