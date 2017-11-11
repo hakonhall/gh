@@ -998,10 +998,14 @@ function CreatePullRequest {
 }
 
 function gh_checkin {
-    local assignee="" comment="" merge=false ptal=false title=""
+    local approve=false assignee="" comment="" merge=false ptal=false title=""
     while (( $# > 0 ))
     do
 	case "$1" in
+	    -A|--approve|+1)
+		approve=true
+		shift
+		;;
 	    -a|--assignee)
 		assignee="$2"
 		shift 2
@@ -1624,6 +1628,8 @@ function WaitForChecks {
     do
 	Fail "Not implemented... OUT='$OUT'"
     done
+
+    echo "All checks pass"
 }
 
 function AssignPullRequest {
@@ -1905,7 +1911,26 @@ function gh_wait {
 
     local wrong_usage=true
 
-    if (( $# == 1 ))
+    if (( $# == 0 ))
+    then
+	GitHubInfoFromOrigin
+	local endpoint="$OUT"
+	local owner="$OUT2"
+	local repo="$OUT3"
+
+	GetBranch
+	local branch="$OUT"
+
+	if ! GetPullRequestNumber "$endpoint" "$owner" "$repo" "$branch"
+	then
+	    Fail "There's no pull request associated with working directory"
+	fi
+	local number="$OUT"
+	local url="$OUT2"
+
+	wrong_usage=false
+	echo "Found pull request $url"
+    elif (( $# == 1 ))
     then
 	if [[ "$1" =~ ^[0-9]+$ ]]
 	then
@@ -1932,7 +1957,7 @@ function gh_wait {
 
     if $wrong_usage
     then
-	UsageError "'$1' is neither an URL nor a PR number"
+	UsageError "Please specify which pull request to wait for"
     fi
 
     if test "$assignee" != ""
