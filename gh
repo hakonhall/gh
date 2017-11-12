@@ -2122,6 +2122,7 @@ function Main {
 	[wait]=gh_wait
 
 	# Unofficial commands
+	[b]=gh_branch
 	[branch]=gh_branch
 	[checkout]=gh_checkout
 	[co]=gh_checkout
