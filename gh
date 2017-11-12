@@ -40,7 +40,7 @@ function Usage {
 Usage: $PROGRAM COMMAND [OPTION...] [ARG...]
 Git and GitHub tool.
 
-Commands:
+COMMANDS
   checkin|ci [OPTION...] [TITLE]
       Push local change to pull request and wait. See wait for options.
   clone PATTERN
@@ -52,10 +52,30 @@ Commands:
       Wait for checks to pass for PR given by working dir or URL.
       Options:
        --approve|-A|+1, approve PR
+       --assignee|-a ASSIGNEE, assign PR to ASSIGNEE
        --comment|-m COMMENT, add comment
        --merge|-m, merge pull request
-       --assignee|-a ASSIGNEE, assign PR to ASSIGNEE
        --ptal|-p, ask assignees to take another look at the PR
+
+CONFIG FILE
+Config file must be put in $config_file, example:
+{
+    "endpoints": {
+	"github": {
+	    "api_authority": "api.github.com",
+	    "user": "hakonhall",
+	    "token": "a615...",
+	    "owners": {
+		"vespa-engine": {
+		    "checks": [
+			"^continuous-integration/travis-ci/pr$",
+			"^cla/licenses$"
+		    ]
+		}
+	    }
+	}
+    }
+}
 EOF
 
     exit 1
@@ -258,6 +278,7 @@ function GetEndpoints {
 
 function ResolveEndpoint {
     local endpoint="$1"
+    SanityCheckEndpoint "$endpoint"
 
     ReadConfigAsString
     local config="$OUT"
@@ -759,6 +780,42 @@ function AssertReposFile {
     fi
 }
 
+function SanityCheckEndpoint {
+    local endpoint="$1"
+
+    local endpoint_regex='^[a-zA-Z0-9_-]+$'
+    if ! [[ "$endpoint" =~ $endpoint_regex ]]
+    then
+	Fail "Bad endpoint '$endpoint': Must match '$endpoint_regex'"
+    fi
+}
+
+function SanityCheckOwner {
+    local owner="$1"
+
+    local owner_regex='^[a-zA-Z0-9_-]+$'
+    if ! [[ "$owner" =~ $owner_regex ]]
+    then
+	Fail "Bad owner '$owner': Must match '$owner_regex'"
+    fi
+}
+
+function SanityCheckRepo {
+    local repo="$1"
+
+    local repo_regex='^[a-zA-Z0-9_-]+$'
+    if ! [[ "$repo" =~ $repo_regex ]]
+    then
+	Fail "Bad repo '$repo': Must match '$repo_regex'"
+    fi
+}
+
+function ValidateRepo {
+    SanityCheckEndpoint "$1"
+    SanityCheckOwner "$2"
+    SanityCheckRepo "$3"
+}
+
 function gh_clone {
     if (( $# != 1 ))
     then
@@ -801,7 +858,9 @@ function gh_clone {
 
     read -r endpoint owner repo ssh_url <<< "${matched_lines[0]}"
 
-    Run git clone "$ssh_url" "$owner/$repo"
+    ValidateRepo "$endpoint" "$owner" "$repo"
+
+    Run git clone "$ssh_url" "$endpoint/$owner/$repo"
 }
 
 function GetBranch {
