@@ -41,13 +41,21 @@ Usage: $PROGRAM COMMAND [OPTION...] [ARG...]
 Git and GitHub tool.
 
 Commands:
-  checkin|ci [TITLE]
-      Push local change to pull request.
+  checkin|ci [OPTION...] [TITLE]
+      Push local change to pull request and wait. See wait for options.
   clone PATTERN
       Clone ENDPOINT:OWNER/REPO matching PATTERN from $repos_file.
   help
   refresh
       Read $config_file and generate $repos_file cache.
+  wait [OPTION...] [URL]
+      Wait for checks to pass for PR given by working dir or URL.
+      Options:
+       --approve|-A|+1, approve PR
+       --comment|-m COMMENT, add comment
+       --merge|-m, merge pull request
+       --assignee|-a ASSIGNEE, assign PR to ASSIGNEE
+       --ptal|-p, ask assignees to take another look at the PR
 EOF
 
     exit 1
@@ -1057,13 +1065,7 @@ function gh_checkin {
     local repo="$OUT3"
     local ssh_url="$OUT4"
 
-    ResolveEndpoint "$endpoint"
-    local rest_url="$OUT"
-    local user="$OUT2"
-    local token="$OUT3"
-    local graphql_url="$OUT4"
-
-    local is_clean=""
+    local known_to_be_dirty=false
 
     GetBranch
     local branch="$OUT"
@@ -1074,7 +1076,7 @@ function gh_checkin {
 	then
 	    Fail "On master branch, and there's nothing to commit"
 	fi
-	is_clean=false
+	known_to_be_dirty=true
 
 	branch="${title,,}"
 	branch=$(printf "%s" "$branch" | tr ' ' - | tr -Cd '[[:alnum:]-]')
@@ -1082,6 +1084,10 @@ function gh_checkin {
 	then
 	    Fail "Failed to find a good branch name from the title '$title'"
 	fi
+
+	ResolveEndpoint "$endpoint"
+	local user="$OUT2"
+
 	branch="$user/$branch"
 
 	Stage
@@ -1090,7 +1096,7 @@ function gh_checkin {
 	git stash pop --quiet
     fi
 
-    if test "$is_clean" == false || ! IsClean
+    if $known_to_be_dirty || ! IsClean
     then
 	local -a args=()
 	if test "$title" != ""
@@ -1271,6 +1277,11 @@ function gh_diff {
 function gh_head {
     gh_checkout master
     gh_update
+}
+
+function gh_history {
+    Stage
+    gitk
 }
 
 function TryGetPullRequest {
@@ -2117,6 +2128,8 @@ function Main {
 	[di]=gh_diff
 	[diff]=gh_diff
 	[head]=gh_head
+	[hi]=gh_history
+	[history]=gh_history
 	[i]=gh_info
 	[info]=gh_info
 	[undo]=gh_undo
