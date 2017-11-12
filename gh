@@ -111,6 +111,19 @@ function CaptureStd {
     OUT="$out"
 }
 
+function CaptureStdLines {
+    CaptureStd "$@"
+    local out="$OUT"
+
+    local -a lines=()
+    if (( ${#out} > 0 ))
+    then
+	mapfile -t lines <<< "$out"
+    fi
+
+    OUTA=("${lines[@]}")
+}
+
 function PrintLines {
     local arg
     for arg in "$@"
@@ -1123,6 +1136,81 @@ function gh_undo {
     Stage
 }
 
+function gh_clean_branch {
+    CaptureStdLines git branch
+    local -a lines=("${OUTA[@]}")
+
+    local line
+    for line in "${lines[@]}"
+    do
+	if ! [[ "$line" =~ ^('* '|'  ')([^' ']+) ]]
+	then
+	    Fail "Unexpected format for line output by 'git branch': '$line'"
+	fi
+
+	local branch="${BASH_REMATCH[2]}"
+	if test "${BASH_REMATCH[1]}" == '  '
+	then
+	    if ! git branch --quiet -d "$branch" &> /dev/null
+	    then
+		if ! read -n1 -p "Force-delete '$branch'? [Y/n] "
+		then
+		    echo
+		    Fail "Failed to read answer"
+		fi
+
+		case "$REPLY" in
+		    "") : ;;
+		    y|Y) echo ;;
+		    *)
+			echo
+			continue
+			;;
+		esac
+
+		if ! git branch --quiet -D "$branch"
+		then
+		    # There should already be some error messages printed
+		    Fail "Aborting"
+		fi
+	    fi
+
+	    echo "Removed '$branch'"
+	fi
+    done
+}
+
+function gh_branch {
+    local clean=false
+
+    while (( $# > 0 ))
+    do
+	case "$1" in
+	    --clean) clean=true ;;
+	    *) break ;;
+	esac
+	shift
+    done
+
+    if (( $# > 0 ))
+    then
+	UsageError "Too many arguments"
+    fi
+
+    if $clean
+    then
+	if gh_clean_branch
+	then
+	    return 0
+	else
+	    return $?
+	fi
+    fi
+
+    GetBranch
+    echo "$OUT"
+}
+
 function gh_checkout {
     if (( $# != 1 ))
     then
@@ -1786,7 +1874,7 @@ function WaitForChecksThen {
 		Fail "Failed to check out master"
 	    fi
 
-	    if ! git pull --rebase master
+	    if ! git pull --rebase
 	    then
 		Fail "Failed to pull master"
 	    fi
@@ -2023,6 +2111,7 @@ function Main {
 	[wait]=gh_wait
 
 	# Unofficial commands
+	[branch]=gh_branch
 	[checkout]=gh_checkout
 	[co]=gh_checkout
 	[di]=gh_diff
