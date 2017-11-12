@@ -252,7 +252,7 @@ function GetEndpoints {
     ReadConfigAsString
     local config="$OUT"
 
-    JqRawLines ".endpoints[].name" "$config"
+    JqRawLines ".endpoints | keys[]" "$config"
     # Forward OUTA
 }
 
@@ -265,7 +265,7 @@ function ResolveEndpoint {
     ToJsonString "$endpoint"
     local name="$OUT"
 
-    Jq ".endpoints[] | select(.name == $name)" "$config"
+    Jq ".endpoints.$endpoint" "$config"
     local json="$OUT"
 
     JqRaw .api_authority "$json"
@@ -1331,8 +1331,21 @@ function TryGetPullRequest {
     then
 	return 1
     fi
+    json="$OUT"
 
-    JqRaw ".data.repository.pullRequest.headRef.name" "$json"
+    JqRaw ".state" "$json"
+    local state="$OUT"
+    case "$state" in
+	OPEN) : ;;
+	CLOSED|MERGED)
+	    # E.g. the head commit is not available if closed, which we return
+	    # below (may not be needed?), therefore bail out here.
+	    Fail "Pull request is $state"
+	    ;;
+	*) Fail "Pull request in bad state '$state'" ;;
+    esac
+
+    JqRaw ".headRef.name" "$json"
     local branch="$OUT"
     if ! [[ "$branch" =~ ^[a-zA-Z0-9_/-]+$ ]]
     then
@@ -1342,29 +1355,29 @@ function TryGetPullRequest {
 	Fail "Pull request bound to master, refusing to proceed"
     fi
 
-    JqRaw ".data.repository.pullRequest.headRef.target.oid" "$json"
+    JqRaw ".headRef.target.oid" "$json"
     local head_commit="$OUT"
     if ! [[ "$head_commit" =~ ^[a-f0-9]{40}$ ]]
     then
 	Fail "Unexpected format of head commit: '$head_commit'"
     fi
 
-    JqRaw ".data.repository.pullRequest.url" "$json"
+    JqRaw ".url" "$json"
     local url="$OUT"
     if ! [[ "$url" =~ ^http ]]
     then
 	Fail "Unexpected format of pull request URL: '$url'"
     fi
 
-    Jq ".data.repository.pullRequest.comments" "$json"
+    Jq ".comments" "$json"
     local last_comments_id="$OUT"
     if test "$last_comments_id" != null
     then
-	JqRaw ".data.repository.pullRequest.comments.pageInfo.endCursor" "$json"
+	JqRaw ".comments.pageInfo.endCursor" "$json"
 	last_comment_id="$OUT"
     fi
 
-    JqRawLines ".data.repository.pullRequest.assignees.nodes[].login" "$json"
+    JqRawLines ".assignees.nodes[].login" "$json"
     local -a assignees=("${OUTA[@]}")
 
     OUT="$branch"
@@ -1440,81 +1453,96 @@ function FindEndpointIfPullRequestUrl {
     Fail "No endpoint in config file '$CONFIG_FILE' owns '$url'"
 }
 
+function ChecksAt {
+    local json="$1"
+    shift
+    local -a fields=("$@")
+
+    if ! Jq ".checks" "$json"
+    then
+	Fail "Failed to access .checks of '$json'"
+    fi
+    local checks_json="$OUT"
+
+    if test "$checks_json" == null
+    then
+	local has_checks=false
+	local -a checks=()
+    else
+	local has_checks=true
+	JqRawLines ".checks[]" "$json"
+	local -a checks=("${OUTA[@]}")
+    fi
+
+    local has_field_value=true
+
+    local field
+    for field in "${fields[@]}"
+    do
+	ToJsonString "$field"
+	local field_json="$OUT"
+
+	if ! Jq ".$field_json" "$json"
+	then
+	    Fail "Failed to access '$field_json' of '$json'"
+	fi
+	json="$OUT"
+
+	if test "$json" == null
+	then
+	    has_field_value=false
+	    break
+	else
+	    has_field_value=true
+	fi
+    done
+
+    OUT="$has_checks"
+    OUT2="$has_field_value"
+    OUT3="$json"
+    OUTA=("${checks[@]}")
+}
+
 function GetChecksFor {
     local endpoint="$1"
     local owner="$2"
     local repo="$3"
 
     ReadConfigAsString
-    local config_json="$OUT"
+    local json="$OUT"
 
-    ToJsonString "$endpoint"
-    local endpoint_json="$OUT"
-
-    Jq ".endpoints[] | select(.name == $endpoint_json)" "$config_json"
-    local selected_endpoint_json="$OUT"
-
-    if test "$selected_endpoint_json" == ""
-    then
-	Fail "There's no specification of '$endpoint' in '$CONFIG_FILE'"
-    fi
+    local -a root_fields=(endpoints "$endpoint")
+    local -a endpoint_fields=(owners "$owner")
+    local -a owner_fields=(repos "$repo")
+    local -a repo_fields=()
 
     local -a checks=()
 
-    Jq ".checks" "$selected_endpoint_json"
-    local endpoint_checks_string="$OUT"
-    if test "$endpoint_checks_string" != null
-    then
-	Jq .checks "$selected_endpoint_json"
-	if test "$OUT" != null
+    local field
+    for field in root endpoint owner repo
+    do
+	local -n fields="${field}_fields"
+
+	ChecksAt "$json" "${fields[@]}"
+	local has_checks="$OUT"
+	if $has_checks
 	then
-	    JqRawLines ".checks[]" "$selected_endpoint_json"
 	    checks=("${OUTA[@]}")
 	fi
-    fi
 
-    ToJsonString "$owner"
-    local owner_json="$OUT"
-
-    Jq .owners "$selected_endpoint_json"
-    if test "$OUT" != null
-    then
-	Jq ".owners[] | select(.name == $owner_json)" "$selected_endpoint_json"
-	local selected_owner_json="$OUT"
-	if test "$selected_owner_json" != ""
+	local has_field_value="$OUT2"
+	if $has_field_value
 	then
-	    Jq ".checks" "$selected_owner_json"
-	    local owner_checks_string="$OUT"
-	    if test "$owner_checks_string" != null
-	    then
-		Jq .checks "$selected_owner_json"
-		if test "$OUT" != ""
-		then
-		    JqRawLines ".checks[]" "$selected_owner_json"
-		    checks=("${OUTA[@]}")
-		fi
-	    fi
-
-	    ToJsonString "$repo"
-	    local repo_json="$OUT"
-
-	    Jq .repos "$selected_owner_json"
-	    if test "$OUT" != null
-	    then
-		Jq ".repos[] | select(.name == $repo_json)" "$selected_owner_json"
-		local selected_repo_json="$OUT"
-		if test "$selected_repo_json" != ""
-		then
-		    Jq ".checks" "$selected_repo_json"
-		    if test "$OUT" != null
-		    then
-			JqRawLines ".checks[]" "$selected_repo_json"
-			checks=("${OUTA[@]}")
-		    fi
-		fi
-	    fi
+	    json="$OUT3"
+	else
+	    break
 	fi
-    fi
+
+	# Without this, the next iteration of the loop will think we're setting
+	# the -n (nameref) attribute on endpoint_fields (and warn that -n
+	# cannot be set on an array).
+	unset -n fields
+    done
 
     OUTA=("${checks[@]}")
 }
