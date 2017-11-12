@@ -1238,6 +1238,9 @@ function TryGetPullRequest {
     if ! [[ "$branch" =~ ^[a-zA-Z0-9_/-]+$ ]]
     then
 	Fail "Unexpected name of branch: '$branch'"
+    elif test "$branch" == master
+    then
+	Fail "Pull request bound to master, refusing to proceed"
     fi
 
     JqRaw ".data.repository.pullRequest.headRef.target.oid" "$json"
@@ -1772,8 +1775,24 @@ function WaitForChecksThen {
 	echo "Pull request merged"
 
 	DeleteRest "$endpoint" "/repos/$owner/$repo/git/refs/heads/$branch"
-	echo "Branch deleted"
+	echo "Branch deleted at $endpoint:$owner/$repo"
+
+	GetBranch
+	local wd_branch="$OUT"
+
+	if test "$wd_branch" == "$branch"
+	then
+	    gh_head
+	    echo "Checked out master and pulled"
+	    if ! git branch --quiet -d "$wd_branch"
+	    then
+		Fail "Failed to delete local branch '$wd_branch'"
+	    fi
+	    echo "Deleted local branch '$wd_branch'"
+	fi
     fi
+
+    echo Success
 }
 
 function GetMentionableUsers {
