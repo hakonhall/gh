@@ -1874,7 +1874,7 @@ function WaitForChecksThen {
 		Fail "Failed to check out master"
 	    fi
 
-	    if ! git pull --rebase
+	    if ! git pull --quiet --rebase
 	    then
 		Fail "Failed to pull master"
 	    fi
