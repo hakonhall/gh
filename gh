@@ -61,7 +61,7 @@ COMMANDS
        --approve|-A|+1, approve PR
        --assignee|-a ASSIGNEE, assign PR to ASSIGNEE
        --comment|-m COMMENT, add comment
-       --merge|-m, merge pull request
+       --merge|-m, merge pull request, delete branch, and check out master
        --ptal|-p, ask assignees to take another look at the PR
 EOF
 
