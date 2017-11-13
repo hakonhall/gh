@@ -1366,7 +1366,12 @@ function gh_diff {
 
     if (( $# == 0 ))
     then
-	git diff HEAD
+	if type diffuse &> /dev/null
+	then
+	    diffuse -m
+	else
+	    git diff HEAD
+	fi
     else
 	git diff "$@"
     fi
@@ -1379,7 +1384,12 @@ function gh_head {
 
 function gh_history {
     Stage
-    gitk
+    if type gitk &> /dev/null
+    then
+	gitk
+    else
+	git log
+    fi
 }
 
 function TryGetPullRequest {
@@ -1851,13 +1861,37 @@ function WaitForChecks {
     local commit="$5"
     local last_comment_id="$6"
 
+    local -i sleep_seconds=1
+    local pending_message=""
+    local previous_message=""
     while ! CheckStatus "$endpoint" "$owner" "$repo" "$number" "$commit" \
 	    "$last_comment_id"
     do
-	Fail "Not implemented... OUT='$OUT'"
+	local message="$OUT"
+	if test "$message" == ""
+	then
+	    Fail "Internal error: Check status failed but without message"
+	fi
+
+	if test "$message" != "$previous_message"
+	then
+	    printf "%s%s..." "$pending_message" "$message"
+	    pending_message=$'\n'
+	    sleep_seconds=1
+	else
+	    printf "."
+
+	    if (( sleep_seconds < 10 ))
+	    then
+		sleep_seconds+=1
+	    fi
+	fi
+
+	previous_message="$message"
+	sleep "$sleep_seconds"
     done
 
-    echo "All checks pass"
+    printf "%s%s\n" "$pending_message" "All checks pass"
 }
 
 function AssignPullRequest {
