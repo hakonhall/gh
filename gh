@@ -4,9 +4,17 @@
 
 set -e
 
-declare -r CONFIG_FILE="$HOME/.gh"
 declare -r PROGRAM="${0##*/}"
-declare -r REPOS_FILE="$HOME/.gh-repos"
+
+declare -r DEFAULT_CONFIG_ROOT="$HOME"
+declare -r CONFIG_ROOT="${GH_CONFIG_ROOT:-$DEFAULT_CONFIG_ROOT}"
+declare -r PRETTY_CONFIG_ROOT="${CONFIG_FILE/#$HOME/\~}"
+
+declare -r CONFIG_FILE="$CONFIG_ROOT"/.gh
+declare -r PRETTY_CONFIG_FILE="$PRETTY_CONFIG_ROOT"/.gh
+
+declare -r REPOS_FILE="$CONFIG_ROOT"/.gh-repos
+declare -r PRETTY_REPOS_FILE="$PRETTY_CONFIG_ROOT"/.gh-repos
 
 declare ECHO_COMMAND=false
 
@@ -33,21 +41,20 @@ function Usage {
 	printf "%s\n" "$arg"
     done
 
-    local config_file="${CONFIG_FILE/#$HOME/\~}"
-    local repos_file="${REPOS_FILE/#$HOME/\~}"
-
     cat <<EOF
 Usage: $PROGRAM COMMAND [OPTION...] [ARG...]
 Git and GitHub tool.
+
+See '$PROGRAM help config' for how to set up config.
 
 COMMANDS
   checkin|ci [OPTION...] [TITLE]
       Push local change to pull request and wait. See wait for options.
   clone PATTERN
-      Clone ENDPOINT:OWNER/REPO matching PATTERN from $repos_file.
-  help
+      Clone ENDPOINT:OWNER/REPO matching PATTERN from $PRETTY_REPOS_FILE.
+  help [config]
   refresh
-      Read $config_file and generate $repos_file cache.
+      Read $PRETTY_CONFIG_FILE and generate $PRETTY_REPOS_FILE cache.
   wait [OPTION...] [URL]
       Wait for checks to pass for PR given by working dir or URL.
       Options:
@@ -56,26 +63,6 @@ COMMANDS
        --comment|-m COMMENT, add comment
        --merge|-m, merge pull request
        --ptal|-p, ask assignees to take another look at the PR
-
-CONFIG FILE
-Config file must be put in $config_file, example:
-{
-    "endpoints": {
-	"github": {
-	    "api_authority": "api.github.com",
-	    "user": "hakonhall",
-	    "token": "a615...",
-	    "owners": {
-		"vespa-engine": {
-		    "checks": [
-			"^continuous-integration/travis-ci/pr$",
-			"^cla/licenses$"
-		    ]
-		}
-	    }
-	}
-    }
-}
 EOF
 
     exit 1
@@ -863,6 +850,58 @@ function gh_clone {
     Run git clone "$ssh_url" "$endpoint/$owner/$repo"
 }
 
+function gh_help {
+    case "$#" in
+	0) Usage ;;
+	1)
+	    local topic="$1"
+	    case "$topic" in
+		config) gh_help_config ;;
+		*) UsageError help "Unknown help topic '$topic'" ;;
+	    esac
+	    ;;
+	*) UsageError '' "Too many arguments" ;;
+    esac
+}
+
+function gh_help_config {
+    cat <<EOF
+The config file .gh should be defined in, and the repo cache .gh-repos is saved
+in, the config root directory.  The config root is by default
+$DEFAULT_CONFIG_ROOT, but can be overridden by setting GH_CONFIG_ROOT.
+
+Example config:
+{
+    "endpoints": {
+        "github": {
+            "api_authority": "api.github.com",
+            "user": "hakonhall",
+            "token": "7fe3...",
+            "owners": {
+                "vespa-engine": {
+                    "checks": [
+                        "^cla/licenses\$"
+                    ]
+                    "repos": {
+                        "vespa": {
+                            "checks": [
+                                "^continuous-integration/travis-ci/pr\$",
+                                "^cla/licenses$"
+                            ]
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+"token" is a personal access token.
+"checks" can be put either at root level, in an endpoint, in an owner, or in a
+repo.
+EOF
+}
+
 function GetBranch {
     if ! OUT=$(git rev-parse --abbrev-ref HEAD)
     then
@@ -1259,7 +1298,7 @@ function gh_branch {
 
     if (( $# > 0 ))
     then
-	UsageError "Too many arguments"
+	UsageError branch "Too many arguments"
     fi
 
     if $clean
@@ -1279,7 +1318,7 @@ function gh_branch {
 function gh_checkout {
     if (( $# != 1 ))
     then
-	UsageError undo "Command takes exactly one argument"
+	UsageError checkout "Command takes exactly one argument"
     fi
     local branch="$1"
 
@@ -1296,7 +1335,7 @@ function gh_checkout {
 function gh_update {
     if (( $# != 0 ))
     then
-	UsageError undo "Command takes exactly zero arguments"
+	UsageError update "Command takes exactly zero arguments"
     fi
 
     GetBranch
@@ -2172,7 +2211,7 @@ function gh_wait {
 
     if $wrong_usage
     then
-	UsageError "Please specify which pull request to wait for"
+	UsageError wait "Please specify which pull request to wait for"
     fi
 
     if test "$assignee" != ""
@@ -2204,7 +2243,7 @@ function Main {
 	[checkin]=gh_checkin
 	[ci]=gh_checkin
 	[clone]=gh_clone
-	[help]=Usage
+	[help]=gh_help
 	[refresh]=gh_refresh
 	[wait]=gh_wait
 
