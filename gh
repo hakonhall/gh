@@ -1141,21 +1141,9 @@ function gh_checkin {
 		ptal=true
 		shift
 		;;
-	    -t|--title)
-		title="$2"
-		shift 2
-		;;
-	    *)
-		title="$1"
-		shift
-		break
+	    *) break ;;
 	esac
     done
-
-    if (( $# > 0 ))
-    then
-	UsageError checkin "Too many arguments"
-    fi
 
     GitHubInfoFromOrigin
     local endpoint="$OUT"
@@ -1182,6 +1170,12 @@ function gh_checkin {
 	fi
 	known_to_be_dirty=true
 
+	if (( $# != 1 ))
+	then
+	    UsageError checkin "Missing TITLE argument"
+	fi
+	local title="$1"
+
 	branch="${title,,}"
 	branch=$(printf "%s" "$branch" | tr ' ' - | tr -Cd '[[:alnum:]-]')
 	if test "$branch" == ""
@@ -1198,18 +1192,24 @@ function gh_checkin {
 	git stash save --quiet --include-untracked
 	git checkout --quiet -b "$branch"
 	git stash pop --quiet
-    fi
 
-    if $known_to_be_dirty || ! IsClean
+	Stage
+        git commit --quiet -m "$title"
+    elif ! IsClean
     then
 	local -a args=()
-	if test "$title" != ""
-	then
-	    args+=(-m "$title")
-	fi
+	case "$#" in
+	    0) : ;;
+	    1) args+=(-m "$1") ;;
+	    *) UsageError checkin "Too many arguments" ;;
+	esac
 
 	Stage
         git commit --quiet "${args[@]}"
+    elif (( $# != 0 ))
+    then
+	UsageError checkin "Too many arguments: No local changes but " \
+		   "TITLE given"
     fi
     
     git push --quiet origin "$branch"
