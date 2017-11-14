@@ -1163,6 +1163,12 @@ function gh_checkin {
     local repo="$OUT3"
     local ssh_url="$OUT4"
 
+    if test "$assignee" != ""
+    then
+	LookupAssignee "$endpoint" "$owner" "$repo" "$assignee"
+	assignee="$OUT"
+    fi
+
     local known_to_be_dirty=false
 
     GetBranch
