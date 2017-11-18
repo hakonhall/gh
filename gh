@@ -937,6 +937,68 @@ function gh_info {
     Run git status --short
 }
 
+function gh_revert {
+    if (($# == 0))
+    then
+        Run git reset --quiet --hard
+        # Resetting an added file/directory leaves it as untracked, so we need
+        # to clean. Unfortunately, cleaning may also remove already untracked
+        # files.
+        # -f:  Force
+        # -d:  Remove directories
+        Run git clean --quiet -fd
+    else
+	# TODO: For each file in "$@", we should check it's status: whether
+	# it's added, modified, deleted (, attribute change?), and this may be
+	# different in wd vs index. The result of each such file should be an
+	# action, like remove file from index and wd.
+
+	Stage
+
+	local -A file_status=()
+
+	CaptureStdLines git status --short
+	local -a lines=("${OUTA[@]}")
+
+	local line
+	for line in "${lines[@]}"
+	do
+	    if ! [[ "$line" =~ ^(.)'  '([^' ']+)$ ]]
+	    then
+		Fail "Badly formatted status line, perhaps file path " \
+		     "contains space? line: '$line'"
+	    fi
+	    local status="${BASH_REMATCH[1]}"
+	    local path="${BASH_REMATCH[2]}"
+	    path=$(realpath -m "$path")
+
+	    case "$status" in
+		M|A|D) file_status["$path"]="$status" ;;
+		*) Fail "Unknown git status '$status' for '$path'" ;;
+	    esac
+	done
+
+	local path
+	for path in "$@"
+	do
+	    path=$(realpath -m "$path")
+
+	    local status="${file_status[$path]}"
+	    case "$status" in
+		M|D)
+		    Run git reset -q HEAD "$path"
+		    Run git checkout -q "$path"
+		    ;;
+		A)
+		    Run git reset -q HEAD "$path"
+		    Run rm "$path"
+		    ;;
+		*) Fail "There's a path mismatch!?"
+	    esac
+	done
+    fi
+}
+
 function GetGitRootRelative {
     local out
     if ! out=$(git rev-parse --show-cdup 2>&1)
@@ -1372,7 +1434,7 @@ function gh_diff {
 
     if (( $# == 0 ))
     then
-	if type diffuse &> /dev/null
+	if test -v DISPLAY && type diffuse &> /dev/null
 	then
 	    diffuse -m
 	else
@@ -2299,6 +2361,9 @@ function Main {
 	[history]=gh_history
 	[i]=gh_info
 	[info]=gh_info
+	[is-clean]=IsClean
+	[revert]=gh_revert
+	[stage]=Stage
 	[undo]=gh_undo
 	[up]=gh_update
 	[update]=gh_update
