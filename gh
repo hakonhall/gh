@@ -729,7 +729,8 @@ function gh_refresh {
     done
 
     cp "$REPOS_FILE" "$OLD_REPOS_FILE"
-    mv "$repos_workfile" "$REPOS_FILE"
+    sort "$repos_workfile" > "$REPOS_FILE"
+    rm "$repos_workfile"
 }
 
 function GitHubInfoFromOrigin {
