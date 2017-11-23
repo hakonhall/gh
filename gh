@@ -15,6 +15,7 @@ declare -r PRETTY_CONFIG_FILE="$PRETTY_CONFIG_ROOT"/.gh
 
 declare -r REPOS_FILE="$CONFIG_ROOT"/.gh-repos
 declare -r PRETTY_REPOS_FILE="$PRETTY_CONFIG_ROOT"/.gh-repos
+declare -r OLD_REPOS_FILE="$CONFIG_ROOT"/.gh-repos.old
 
 declare ECHO_COMMAND=false
 
@@ -566,6 +567,9 @@ query {
         hasNextPage
       }
       nodes {
+        owner {
+          login
+        }
         name
       }
     }
@@ -575,7 +579,14 @@ query {
 	QueryGraph "$endpoint" "$query"
 	local response_json="$OUT"
 
-	JqRawLines ".data.repositoryOwner.repositories.nodes[].name" \
+	# The weirdest thing: With owner_json being e.g. 'hakon', I get some
+	# owner.login which are != 'hakon'. It's not clear why these extra
+	# repositories are output. Depends on permissions?
+	#
+	# Therefore, we will select only those having .owner.login equal to
+	# $owner.
+
+	JqRawLines ".data.repositoryOwner.repositories.nodes[] | select(.owner.login == $owner_json) | .name" \
 		   "$response_json"
 	repos+=("${OUTA[@]}")
 
@@ -717,6 +728,7 @@ function gh_refresh {
 	done
     done
 
+    cp "$REPOS_FILE" "$OLD_REPOS_FILE"
     mv "$repos_workfile" "$REPOS_FILE"
 }
 
