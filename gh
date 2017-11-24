@@ -108,10 +108,11 @@ function Run {
     "$@"
 }
 
-function Git {
-    if ! git "$@"
+function RunOrFail {
+    if ! "$@"
     then
-	Fail "git $* command failed"
+	EchoCommand "$@"
+	Fail "Command failed"
     fi
 }
 
@@ -1422,24 +1423,46 @@ function gh_update {
     GetBranch
     local branch="$OUT"
 
+    if [ "$branch" != master ]
+    then
+	Fail "Refuse to update non-master branch"
+    fi
+
+    RunOrFail git fetch --quiet
+
+    # Sanity-check: May want to do this elsewhere or remove?
+    CaptureStd git rev-parse --abbrev-ref @{upstream}
+    local upstream="$OUT"
+    if test "$upstream" != origin/master
+    then
+	Fail "Upstream is not origin"
+    fi
+
+    CaptureStd git rev-parse @{upstream}
+    local upstream_commit="$OUT"
+
+    CaptureStd git rev-parse master
+    local master_commit="$OUT"
+
+    if test "$upstream_commit" == "$master_commit"
+    then
+	# There are no upstream changes
+	echo "There were no upstream changes"
+	return
+    fi
+
     CaptureStd git stash --include-untracked
     local stash_output="$OUT"
 
-    if [ "$branch" == master ]
-    then
-	git pull --quiet --rebase
-    else
-	Fail "Refuse to update non-master branch"
-    fi
+    git rebase -q origin/master
 
     if ! [[ "$stash_output" =~ ^'No local changes to save'$ ]]
     then
         # Cannot be --quiet, since it swallows warnings about conflicts.
 	Run git stash pop
+	Stage
+	gh_info
     fi
-
-    Stage
-    gh_info
 }
 
 function gh_diff {
