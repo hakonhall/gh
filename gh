@@ -1459,9 +1459,8 @@ function gh_update {
     if ! [[ "$stash_output" =~ ^'No local changes to save'$ ]]
     then
         # Cannot be --quiet, since it swallows warnings about conflicts.
-	Run git stash pop
-	Stage
-	gh_info
+	RunOrFail git stash pop
+	git status
     fi
 }
 
