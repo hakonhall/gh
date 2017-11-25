@@ -1469,7 +1469,9 @@ function gh_diff {
 
     if (( $# == 0 ))
     then
-	if test -v DISPLAY && type diffuse &> /dev/null
+	# Only run diffuse if we're running X, diffuse is installed, and stdout
+	# is a terminal (otherwise stdout could be 'less' or a file).
+	if test -v DISPLAY && type diffuse &> /dev/null && test -t 1
 	then
 	    diffuse -m
 	else
