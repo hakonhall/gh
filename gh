@@ -924,6 +924,19 @@ function GetBranch {
 }
 
 function gh_info {
+    local check_upstream=false
+
+    while (( $# > 0 ))
+    do
+	case "$1" in
+	    -u|--upstream)
+		check_upstream=true
+		shift
+		;;
+	    *) break ;;
+	esac
+    done
+
     if (( $# != 0 ))
     then
 	UsageError undo "Command takes exactly zero arguments"
@@ -945,7 +958,35 @@ function gh_info {
 	local branch_text="#$branch"
     fi
 
-    echo "$endpoint:$owner/$repo$branch_text"
+    local upstream_text=""
+    if $check_upstream
+    then
+	RunOrFail git fetch --quiet
+
+	# Sanity-check: May want to do this elsewhere or remove?
+	CaptureStd git rev-parse --symbolic-full-name @{upstream}
+	local upstream="$OUT"
+	if test "$upstream" != refs/remotes/origin/master
+	then
+	    Fail "Upstream is not origin"
+	fi
+
+	CaptureStd git rev-parse origin/master
+	local upstream_commit="$OUT"
+
+	CaptureStd git rev-parse master
+	local master_commit="$OUT"
+
+	CaptureStd git rev-list --count master..origin/master
+	local -i pending_upstream_commits="$OUT"
+
+	if (( pending_upstream_commits > 0 ))
+	then
+	    local upstream_text=" ($pending_upstream_commits pending upstream commits)"
+	fi
+    fi
+
+    echo "$endpoint:$owner/$repo$branch_text$upstream_text"
 
     Stage
     Run git status --short
@@ -1431,14 +1472,14 @@ function gh_update {
     RunOrFail git fetch --quiet
 
     # Sanity-check: May want to do this elsewhere or remove?
-    CaptureStd git rev-parse --abbrev-ref @{upstream}
+    CaptureStd git rev-parse --symbolic-full-name @{upstream}
     local upstream="$OUT"
-    if test "$upstream" != origin/master
+    if test "$upstream" != refs/remotes/origin/master
     then
 	Fail "Upstream is not origin"
     fi
 
-    CaptureStd git rev-parse @{upstream}
+    CaptureStd git rev-parse origin/master
     local upstream_commit="$OUT"
 
     CaptureStd git rev-parse master
