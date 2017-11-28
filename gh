@@ -56,12 +56,12 @@ COMMANDS
   help [config]
   refresh
       Read $PRETTY_CONFIG_FILE and generate $PRETTY_REPOS_FILE cache.
-  wait [OPTION...] [URL]
-      Wait for checks to pass for PR given by working dir or URL.
-      Options:
+  wait [OPTION...] [PR_URL]
+      Wait for checks to pass.
+      Options are applied if and after the checks pass:
        --approve|-A|+1, approve PR
        --assignee|-a ASSIGNEE, assign PR to ASSIGNEE
-       --comment|-m COMMENT, add comment
+       --comment|-c COMMENT, add comment
        --merge|-m, merge pull request, delete branch, and check out master
        --ptal|-p, ask assignees to take another look at the PR
 EOF
