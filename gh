@@ -951,14 +951,8 @@ function gh_info {
     Run git status --short
 }
 
-function gh_pending {
-    if (( $# != 0 ))
-    then
-	UsageError undo "Command takes exactly zero arguments"
-    fi
-
-    GetBranch
-    local branch="$OUT"
+function PendingUpstreamCommits {
+    local branch="$1"
 
     local upstream=""
     if ! upstream=$(git rev-parse --symbolic-full-name "$branch"@{upstream} \
@@ -973,13 +967,23 @@ function gh_pending {
 	     "remote: refuse to run"
     fi
 
-    RunOrFail git fetch --quiet
+    RunOrFail git fetch --quiet origin
 
-    CaptureStd git rev-parse "$upstream"
-    local upstream_commit="$OUT"
+    OUT="$upstream"
+    OUT2="$branch"
+}
 
-    CaptureStd git rev-parse "$branch"
-    local branch_commit="$OUT"
+function gh_pending {
+    if (( $# != 0 ))
+    then
+	UsageError undo "Command takes exactly zero arguments"
+    fi
+
+    GetBranch
+    local branch="$OUT"
+
+    PendingUpstreamCommits "$branch"
+    local upstream="$OUT"
 
     CaptureStd git rev-list --count "$branch".."$upstream"
     local -i pending_commits="$OUT"
@@ -1468,23 +1472,16 @@ function gh_update {
 	Fail "Refuse to update non-master branch"
     fi
 
-    RunOrFail git fetch --quiet
-
-    # Sanity-check: May want to do this elsewhere or remove?
-    CaptureStd git rev-parse --symbolic-full-name @{upstream}
+    PendingUpstreamCommits "$branch"
     local upstream="$OUT"
-    if test "$upstream" != refs/remotes/origin/master
-    then
-	Fail "Upstream is not origin"
-    fi
 
-    CaptureStd git rev-parse origin/master
+    CaptureStd git rev-parse "$branch"
+    local branch_commit="$OUT"
+
+    CaptureStd git rev-parse "$upstream"
     local upstream_commit="$OUT"
 
-    CaptureStd git rev-parse master
-    local master_commit="$OUT"
-
-    if test "$upstream_commit" == "$master_commit"
+    if test "$upstream_commit" == "$branch_commit"
     then
 	# There are no upstream changes
 	echo "There were no upstream changes"
@@ -1494,13 +1491,12 @@ function gh_update {
     CaptureStd git stash --include-untracked
     local stash_output="$OUT"
 
-    git rebase -q origin/master
+    git rebase -q "$upstream"
 
     if ! [[ "$stash_output" =~ ^'No local changes to save'$ ]]
     then
         # Cannot be --quiet, since it swallows warnings about conflicts.
 	RunOrFail git stash pop
-	git status
     fi
 }
 
