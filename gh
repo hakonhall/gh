@@ -24,17 +24,6 @@ declare OUT="" OUT2="" OUT3="" OUT4="" OUT5="" OUT6=""
 declare -a OUTA=()
 declare -A OUTH=()
 
-function Fail {
-    local arg
-    for arg in "$@"
-    do
-	printf "%s" "$arg"
-    done
-    echo
-
-    exit 1
-}
-
 function Usage {
     local arg
     for arg in "$@"
@@ -82,6 +71,71 @@ function UsageError {
 
     Fail "Bad invocation$command_text: " "$@" \
 	     $'\n'"See '$PROGRAM help' for details"
+}
+
+function Fail {
+    local arg
+    for arg in "$@"
+    do
+	printf "%s" "$arg"
+    done
+    echo
+
+    exit 1
+}
+
+function Format {
+    local format="$1"
+    shift
+
+    local -A specifiers=()
+    local assignment
+    for assignment in "$@"
+    do
+	if ! [[ "$assignment" =~ ^(.)=(.*)$ ]]
+	then
+	    Fail "Bad specifier assignment '$assignment'"
+	fi
+	local specifier="${BASH_REMATCH[1]}"
+	local value="${BASH_REMATCH[2]}"
+	specifiers["$specifier"]="$value"
+    done
+
+    local text=""
+    local state=normal
+    local -i i=0
+    for (( ; i < ${#format}; ++i ))
+    do
+	local char="${format:$i:1}"
+
+	case "$state" in
+	    normal)
+		case "$char" in
+		    %) state=specifier ;;
+		    *) text+="$char" ;;
+		esac
+		;;
+	    specifier)
+		case "$char" in
+		    %)
+			text+="%"
+			state=normal
+			;;
+		    *)
+			local substitute="${specifiers[$char]}"
+			if test -z "$substitute"
+			then
+			    Fail "Bad conversion specifier '$char'"
+			fi
+			text+="$substitute"
+			state=normal
+			;;
+		esac
+		;;
+	esac
+    done
+
+    OUT="$text"
 }
 
 function EchoCommand {
@@ -865,17 +919,21 @@ function gh_clone {
 }
 
 function gh_help {
-    case "$#" in
-	0) Usage ;;
-	1)
-	    local topic="$1"
-	    case "$topic" in
-		config) gh_help_config ;;
-		*) UsageError help "Unknown help topic '$topic'" ;;
-	    esac
-	    ;;
-	*) UsageError '' "Too many arguments" ;;
-    esac
+    if (( $# == 0 ))
+    then
+	Usage
+    fi
+
+    local topic="$1"
+    shift
+
+    local help_function=gh_help_"$topic"
+    if ! declare -f "$help_function" &> /dev/null
+    then
+	UsageError help "Unknown help topic '$topic'"
+    fi
+
+    "$help_function" "$@"
 }
 
 function gh_help_config {
@@ -993,6 +1051,110 @@ function gh_pending {
 	1) echo "There us 1 pending upstream commit" ;;
 	*) echo "There are $pending_commits pending upstream commits" ;;
     esac
+}
+
+function PullRequestInfo {
+    local pr_id="$1"
+
+    local wrong_usage=true
+    if [[ "$pr_id" =~ ^[0-9]+$ ]]
+    then
+	local number="$pr_id"
+
+	GitHubInfoFromOrigin
+	local endpoint="$OUT"
+	local owner="$OUT2"
+	local repo="$OUT3"
+	
+	if TryGetPullRequest "$endpoint" "$owner" "$repo" "$number"
+	then
+	    local branch="$OUT"
+	    wrong_usage=false
+	fi
+    elif FindEndpointIfPullRequestUrl "$pr_id"
+    then
+	local endpoint="$OUT"
+	local owner="$OUT2"
+	local repo="$OUT3"
+	local number="$OUT4"
+	local branch="$OUT5"
+	wrong_usage=false
+    fi
+
+    if $wrong_usage
+    then
+	return 1
+    else
+	OUT="$endpoint"
+	OUT2="$owner"
+	OUT3="$repo"
+	OUT4="$branch"
+	OUT5="$number"
+	return 0
+    fi
+}
+
+function gh_resolve_pr {
+    local format=$'endpoint: %e\nowner: %o\nrepo: %r\nnumber: %n\n'
+    while (( $# > 0 ))
+    do
+	case "$1" in
+	    -f|--format)
+		format="$2"
+		shift 2
+		;;
+	    *) break ;;
+	esac
+    done
+
+    if (( $# == 0 ))
+    then
+	UsageError resolve-pr "Missing URL or number of pull request"
+    elif (( $# > 1 ))
+    then
+	UsageError resolve-pr "Too many arguments"
+    fi
+    local pull_request_url_or_number="$1"
+
+    if PullRequestInfo "$pull_request_url_or_number"
+    then
+	Format "$format" e="$OUT" o="$OUT2" r="$OUT3" b="$OUT4" n="$OUT5"
+	printf "%s" "$OUT"
+    else
+	Fail "Failed to find pull request identified by " \
+	     "'$pull_request_url_or_number'"
+    fi
+}
+
+function gh_resolve_wd {
+    local format=$'endpoint: %e\nowner: %o\nrepo: %r\nbranch: %b\nssh-url: %s\n'
+    while (( $# > 0 ))
+    do
+	case "$1" in
+	    -f|--format)
+		format="$2"
+		shift 2
+		;;
+	    *) break ;;
+	esac
+    done
+
+    if (( $# > 0 ))
+    then
+	UsageError resolve-wd "Too many arguments"
+    fi
+
+    GitHubInfoFromOrigin
+    local endpoint="$OUT"
+    local owner="$OUT2"
+    local repo="$OUT3"
+    local ssh_url="$OUT4"
+
+    GetBranch
+    local branch="$OUT"
+
+    Format "$format" e="$endpoint" o="$owner" r="$repo" b="$branch" s="$ssh_url"
+    printf "%s" "$OUT"
 }
 
 function gh_revert {
@@ -1236,11 +1398,21 @@ function CreatePullRequest {
     # Pass through output variables
 }
 
+function gh_help_checkin {
+    # Covered by Usage
+    Usage
+}
+
 function gh_checkin {
     local approve=false assignee="" comment="" merge=false ptal=false title=""
+    local escaped_edit_option=
     while (( $# > 0 ))
     do
 	case "$1" in
+	    --)
+		shift
+		break
+		;;
 	    -A|--approve|+1)
 		approve=true
 		shift
@@ -1253,6 +1425,11 @@ function gh_checkin {
 		comment="$2"
 		shift 2
 		;;
+	    -e|--edit)
+		escaped_edit_option=--edit
+		shift
+		;;
+	    -h|--help) gh_help checkin ;;
 	    -m|--merge)
 		merge=true
 		shift
@@ -1261,6 +1438,7 @@ function gh_checkin {
 		ptal=true
 		shift
 		;;
+	    -*) UsageError checkin "Unknown option '$1'" ;;
 	    *) break ;;
 	esac
     done
@@ -1314,7 +1492,7 @@ function gh_checkin {
 	git stash pop --quiet
 
 	Stage
-        git commit --quiet -m "$title"
+        git commit --quiet $escaped_edit_option -m "$title"
     elif ! IsClean
     then
 	local -a args=()
@@ -1325,7 +1503,7 @@ function gh_checkin {
 	esac
 
 	Stage
-        git commit --quiet "${args[@]}"
+        git commit --quiet $escaped_edit_option "${args[@]}"
     elif (( $# != 0 ))
     then
 	UsageError checkin "Too many arguments: No local changes but " \
@@ -1509,7 +1687,8 @@ function gh_diff {
 	# is a terminal (otherwise stdout could be 'less' or a file).
 	if test -v DISPLAY && type diffuse &> /dev/null && test -t 1
 	then
-	    diffuse -m
+	    # Make it easy to modify while looking at diff
+	    diffuse -m &
 	else
 	    git diff HEAD
 	fi
@@ -1651,11 +1830,14 @@ function GetPullRequest {
 function FindEndpointIfPullRequestUrl {
     local url="$1"
 
-    # Example: https://github.com/vespa-engine/vespa/pull/3937
-    if ! [[ "$url" =~ ^https://([a-zA-Z0-9.-]+)(/[^?#]+)?/([^/]+)/([^/]+)/pull/([0-9]+)$ ]]
+    # Example: https://github.com/vespa-engine/vespa/pull/3937#ignored
+    if ! [[ "$url" =~ ^https://([a-zA-Z0-9.-]+)(/[^?#]+)?/([^/]+)/([^/]+)/pull/([0-9]+)(\#.*)?$ ]]
     then
 	return 1
     fi
+
+    # Remove any suffix #foo
+    local sub_url="${url%${BASH_REMATCH[6]}}"
 
     local authority="${BASH_REMATCH[1]}"
     local owner="${BASH_REMATCH[3]}"
@@ -1684,8 +1866,10 @@ function FindEndpointIfPullRequestUrl {
     do
 	if TryGetPullRequest "$endpoint" "$owner" "$repo" "$number"
 	then
+	    local branch="$OUT"
 	    local canonical_url="$OUT3"
-	    if test "$url" != "$canonical_url"
+
+	    if test "$sub_url" != "$canonical_url"
 	    then
 		Fail "URL '$url' does not match pull request url " \
 		     "'$canonical_url'"
@@ -1695,6 +1879,7 @@ function FindEndpointIfPullRequestUrl {
 	    OUT2="$owner"
 	    OUT3="$repo"
 	    OUT4="$number"
+	    OUT5="$branch"
 	    return 0
 	fi
     done
@@ -1883,7 +2068,7 @@ function CheckStatus {
 	CONFLICTING)
 	    Fail "Pull requests is conflicting with origin/master"
 	    ;;
-	null)
+	null|UNKNOWN)
 	    OUT="Checking for ability to automatically merge"
 	    return 1
 	    ;;
@@ -2361,25 +2546,13 @@ function gh_wait {
 	echo "Found pull request $url"
     elif (( $# == 1 ))
     then
-	if [[ "$1" =~ ^[0-9]+$ ]]
-	then
-	    local number="$1"
-
-	    GitHubInfoFromOrigin
-	    local endpoint="$OUT"
-	    local owner="$OUT2"
-	    local repo="$OUT3"
-	    
-	    if TryGetPullRequest "$endpoint" "$owner" "$repo" "$number"
-	    then
-		wrong_usage=false
-	    fi
-	elif FindEndpointIfPullRequestUrl "$1"
+	if PullRequestInfo "$1"
 	then
 	    local endpoint="$OUT"
 	    local owner="$OUT2"
 	    local repo="$OUT3"
-	    local number="$OUT4"
+	    local branch="$OUT4"
+	    local number="$OUT5"
 	    wrong_usage=false
 	fi
     fi
@@ -2436,6 +2609,8 @@ function Main {
 	[info]=gh_info
 	[is-clean]=IsClean
 	[pending]=gh_pending
+	[resolve-pr]=gh_resolve_pr
+	[resolve-wd]=gh_resolve_wd
 	[revert]=gh_revert
 	[stage]=Stage
 	[undo]=gh_undo
