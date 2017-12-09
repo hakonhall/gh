@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Usage: gh
+# TODO: Require jq, but only when actually needed by any command.
 
 set -e
 
@@ -18,6 +18,15 @@ declare -r OLD_REPOS_FILE="$CONFIG_ROOT"/.gh-repos.old
 
 declare -r DIFF_FILE="$CONFIG_ROOT"/.gh.diff
 
+declare -A COMMANDS=(
+    [checkin]=gh_checkin
+    [ci]=gh_checkin
+    [clone]=gh_clone
+    [h]=gh_help
+    [help]=gh_help
+    [refresh]=gh_refresh
+    [wait]=gh_wait)
+    
 declare ECHO_COMMAND=false
 
 # Generic global variables to hold output from functions
@@ -895,6 +904,113 @@ function ValidateRepo {
     SanityCheckEndpoint "$1"
     SanityCheckOwner "$2"
     SanityCheckRepo "$3"
+}
+
+function PrintCommandsOfUnsorted {
+    # Maps a command function to a space-separated list of commands
+    local -A commands_by_function=()
+
+    local table
+    for table in "$@"
+    do
+	# "$table" expands to e.g. "COMMANDS"
+	eval "local -a commands=(\"\${!$table[@]}\")"
+	local command
+	for command in "${commands[@]}"
+	do
+	    eval "local func=\"\${$table[$command]}\""
+
+	    if ! [[ "$func" =~ ^[a-zA-Z0-9_]+$ ]]
+	    then
+		Fail "Internal error: Bad function name '$func'"
+	    fi
+
+	    if test "${commands_by_function[$func]}" == ""
+	    then
+		commands_by_function["$func"]+="$command"
+	    else
+		commands_by_function["$func"]+=" $command"
+	    fi
+	done
+    done
+
+    local func
+    for func in "${!commands_by_function[@]}"
+    do
+	# Poor man's sorting...
+
+	local -i max_length=0
+	local -A by_length=()
+
+	local command
+	# yes, commands_by_function is supposed to be unescaped
+	for command in ${commands_by_function["$func"]}
+	do
+	    local -i length="${#command}"
+	    # Again, poor man's sorting. Try to print proper commands first,
+	    # then long options, then short options.
+	    case "$command" in
+		--*) length+=10 ;;
+		-*) length+=0 ;;
+		*) length+=20 ;;
+	    esac
+	    if (( length > max_length ))
+	    then
+		max_length=length
+	    fi
+
+	    if test "${by_length[$length]}" != ""
+	    then
+		Fail "Internal error: length of equivalent commands " \
+		     "'$command' and '${by_length[$length]}'"
+	    fi
+	    by_length["$length"]="$command"
+	done
+
+	printf "%q" "${by_length[$max_length]}"
+
+	local -i length=$(( max_length - 1 ))
+	while (( length > 0 ))
+	do
+	    local command="${by_length[$length]}"
+	    if test "$command" != ""
+	    then
+		printf ", %q" "${by_length[$length]}"
+	    fi
+	    length=$(( length - 1 ))
+	done
+
+	printf "\n"
+    done
+}
+
+function PrintCommandsOf {
+    if test -t 1
+    then
+	PrintCommandsOfUnsorted "$@" | sort | pr -4 -w 80 -t -T
+    else
+	PrintCommandsOfUnsorted "$@" | sort
+    fi
+}
+
+function gh_commands {
+    local -i verbosity=0
+
+    while (( $# > 0 ))
+    do
+	case "$1" in
+	    -v) verbosity+=1 ;;
+	    -vv) verbosity+=2 ;;
+	    *) UsageError commands "Unknown argument '$1'" ;;
+	esac
+	shift
+    done
+
+    case "$verbosity" in
+	0) PrintCommandsOf COMMANDS ;;
+	1) PrintCommandsOf COMMANDS UNOFFICIAL_COMMANDS ;;
+	*) PrintCommandsOf COMMANDS UNOFFICIAL_COMMANDS DANGEROUS_COMMANDS ;;
+    esac
 }
 
 function gh_clone {
@@ -2645,6 +2761,41 @@ function gh_wait {
 		      "$approve" "$comment" "$assignee" "$merge" "$ptal"
 }
 
+declare -A UNOFFICIAL_COMMANDS=(
+    [b]=gh_branch
+    [branch]=gh_branch
+    [c]=gh_commands
+    [checkout]=gh_checkout
+    [co]=gh_checkout
+    [commands]=gh_commands
+    [di]=gh_diff
+    [diff]=gh_diff
+    [head]=gh_head
+    [hi]=gh_history
+    [history]=gh_history
+    [i]=gh_info
+    [info]=gh_info
+    [is-clean]=IsClean
+    [load]=gh_load
+    [pending]=gh_pending
+    [resolve-pr]=gh_resolve_pr
+    [resolve-wd]=gh_resolve_wd
+    [revert]=gh_revert
+    [s]=gh_status
+    [save]=gh_save
+    [stage]=Stage
+    [status]=gh_status
+    [undo]=gh_undo
+    [up]=gh_update
+    [update]=gh_update)
+
+declare -A DANGEROUS_COMMANDS=(
+    [--help]=gh_help
+    [-h]=gh_help
+    [orgs]=gh_orgs
+    [repos]=gh_repos
+    [rest]=gh_rest)
+
 function Main {
     if (( $# == 0 ))
     then
@@ -2654,56 +2805,18 @@ function Main {
     local command="$1"
     shift
 
-    # TODO: Require jq
-    # TODO: Implement the following commands:
-    #  - co
-    #  - i (consolidate with gh_info), including staging.
-
-    local -A commands=(
-	# Official commands
-	[checkin]=gh_checkin
-	[ci]=gh_checkin
-	[clone]=gh_clone
-	[help]=gh_help
-	[refresh]=gh_refresh
-	[wait]=gh_wait
-
-	# Unofficial commands
-	[b]=gh_branch
-	[branch]=gh_branch
-	[checkout]=gh_checkout
-	[co]=gh_checkout
-	[di]=gh_diff
-	[diff]=gh_diff
-	[head]=gh_head
-	[hi]=gh_history
-	[history]=gh_history
-	[i]=gh_info
-	[info]=gh_info
-	[is-clean]=IsClean
-	[load]=gh_load
-	[pending]=gh_pending
-	[resolve-pr]=gh_resolve_pr
-	[resolve-wd]=gh_resolve_wd
-	[revert]=gh_revert
-	[s]=gh_status
-	[save]=gh_save
-	[stage]=Stage
-	[status]=gh_status
-	[undo]=gh_undo
-	[up]=gh_update
-	[update]=gh_update
-
-	# Experimental/debug commands
-	[orgs]=gh_orgs
-	[repos]=gh_repos
-	[rest]=gh_rest
-    )
-
-    local func="${commands[$command]}"
+    local func="${COMMANDS[$command]}"
     if test "$func" == ""
     then
-	UsageError '' "No such command '$command'"
+	func="${UNOFFICIAL_COMMANDS[$command]}"
+	if test "$func" == ""
+	then
+	    func="${DANGEROUS_COMMANDS[$command]}"
+	    if test "$func" == ""
+	    then
+		UsageError '' "No such command '$command'"
+	    fi
+	fi
     fi
 
     "$func" "$@"
