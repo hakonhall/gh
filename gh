@@ -4,18 +4,19 @@
 
 set -e
 
+shopt -s nullglob
+
 declare -r PROGRAM="${0##*/}"
 
 declare -r DEFAULT_CONFIG_ROOT="$HOME"
 declare -r CONFIG_ROOT="${GH_CONFIG_ROOT:-$DEFAULT_CONFIG_ROOT}"
-declare -r PRETTY_CONFIG_ROOT="${CONFIG_FILE/#$HOME/\~}"
 
 declare -r CONFIG_FILE="$CONFIG_ROOT"/.gh
-declare -r PRETTY_CONFIG_FILE="$PRETTY_CONFIG_ROOT"/.gh
 
 declare -r REPOS_FILE="$CONFIG_ROOT"/.gh-repos
-declare -r PRETTY_REPOS_FILE="$PRETTY_CONFIG_ROOT"/.gh-repos
 declare -r OLD_REPOS_FILE="$CONFIG_ROOT"/.gh-repos.old
+
+declare -r DIFF_FILE="$CONFIG_ROOT"/.gh.diff
 
 declare ECHO_COMMAND=false
 
@@ -41,10 +42,10 @@ COMMANDS
   checkin|ci [OPTION...] [TITLE]
       Push local change to pull request and wait. See wait for options.
   clone PATTERN
-      Clone ENDPOINT:OWNER/REPO matching PATTERN from $PRETTY_REPOS_FILE.
+      Clone ENDPOINT:OWNER/REPO matching PATTERN from $REPOS_FILE.
   help [config]
   refresh
-      Read $PRETTY_CONFIG_FILE and generate $PRETTY_REPOS_FILE cache.
+      Read $CONFIG_FILE and generate $REPOS_FILE cache.
   wait [OPTION...] [PR_URL]
       Wait for checks to pass.
       Options are applied if and after the checks pass:
@@ -138,6 +139,27 @@ function Format {
     OUT="$text"
 }
 
+function Extract {
+    local regex="$1"
+    local format="$2"
+
+    while read -r
+    do
+	if [[ "$REPLY" =~ $regex ]]
+	then
+	    local specifiers=()
+	    local key
+	    for key in "${!BASH_REMATCH[@]}"
+	    do
+		specifiers+=("$key=${BASH_REMATCH[$key]}")
+	    done
+
+	    Format "$format" "${specifiers[@]}"
+	    printf "%s\n" "$OUT"
+	fi
+    done
+}
+
 function EchoCommand {
     printf "%q" "$1"
     shift
@@ -165,6 +187,7 @@ function Run {
 function RunOrFail {
     if ! "$@"
     then
+	echo -n "Command failed: "
 	EchoCommand "$@"
 	Fail "Command failed"
     fi
@@ -789,8 +812,11 @@ function gh_refresh {
 }
 
 function GitHubInfoFromOrigin {
+    # Unfortunately get-url isn't supported by git on RHEL 7, so we have to
+    # extract URL from 'git remote -v'.
     local remote_url
-    if ! remote_url=$(git remote get-url origin)
+    local fetch_url_regex='^origin'$'\t''(.*) \(fetch\)$'
+    if ! remote_url=$(git remote -v | Extract "$fetch_url_regex" "%1")
     then
 	Fail "Failed to get origin remote URL"
     fi
@@ -1005,8 +1031,44 @@ function gh_info {
 
     echo "$endpoint:$owner/$repo$branch_text$upstream_text"
 
-    Stage
-    Run git status --short
+    gh_status
+}
+
+function gh_load {
+    if (( $# > 0 ))
+    then
+	local -a scp_options=()
+	while test "${1:0:1}" == -
+	do
+	    scp_options+=("$1")
+	    shift
+	done
+
+	if (( $# == 0 ))
+	then
+	    UsageError load "Missing hostname argument"
+	elif (( $# > 1 ))
+	then
+	    UsageError load "Too many arguments"
+	fi
+	local hostname="$1"
+
+	rm -f "$DIFF_FILE"
+
+	RunOrFail scp "${scp_options[@]}" "$hostname:$DIFF_FILE" "$DIFF_FILE"
+    fi
+
+    if ! test -r "$DIFF_FILE"
+    then
+	Fail "There is no diff file at $DIFF_FILE"
+    fi
+
+    if RunOrFail git apply "$DIFF_FILE"
+    then
+	echo "$DIFF_FILE has been applied"
+    else
+	Fail "Failed to load $DIFF_FILE"
+    fi
 }
 
 function PendingUpstreamCommits {
@@ -1217,6 +1279,17 @@ function gh_revert {
 	    esac
 	done
     fi
+}
+
+function gh_save {
+    Stage
+    git diff HEAD > "$DIFF_FILE"
+    echo "Saved to $DIFF_FILE"
+}
+
+function gh_status {
+    Stage
+    Run git status --short
 }
 
 function GetGitRootRelative {
@@ -2608,11 +2681,15 @@ function Main {
 	[i]=gh_info
 	[info]=gh_info
 	[is-clean]=IsClean
+	[load]=gh_load
 	[pending]=gh_pending
 	[resolve-pr]=gh_resolve_pr
 	[resolve-wd]=gh_resolve_wd
 	[revert]=gh_revert
+	[s]=gh_status
+	[save]=gh_save
 	[stage]=Stage
+	[status]=gh_status
 	[undo]=gh_undo
 	[up]=gh_update
 	[update]=gh_update
