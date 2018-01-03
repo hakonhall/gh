@@ -22,6 +22,7 @@ declare -A COMMANDS=(
     [checkin]=gh_checkin
     [ci]=gh_checkin
     [clone]=gh_clone
+    [commands]=gh_commands
     [h]=gh_help
     [help]=gh_help
     [refresh]=gh_refresh
@@ -52,6 +53,8 @@ COMMANDS
       Push local change to pull request and wait. See wait for options.
   clone PATTERN
       Clone ENDPOINT:OWNER/REPO matching PATTERN from $REPOS_FILE.
+  commands
+      Display available commands
   help [config]
   refresh
       Read $CONFIG_FILE and generate $REPOS_FILE cache.
@@ -1825,6 +1828,15 @@ function gh_checkout {
     fi
 }
 
+function gh_clean {
+    # g_delete_branches
+    Run git reset --hard
+    # -f:  Force
+    # -d:  Remove directories
+    # -x:  Don't read .gitignore and GIT_DIR/info/exclude
+    Run git clean -fdx
+}
+
 function gh_update {
     if (( $# != 0 ))
     then
@@ -1869,7 +1881,7 @@ function gh_update {
 
 function gh_diff {
     Stage
-
+    
     if (( $# == 0 ))
     then
 	# Only run diffuse if we're running X, diffuse is installed, and stdout
@@ -1881,6 +1893,10 @@ function gh_diff {
 	else
 	    git diff HEAD
 	fi
+    elif (( $# == 1 )) && test "$1" == -m
+    then
+        local merge_base=$(git merge-base origin/master HEAD)
+        git diff "$merge_base" HEAD
     else
 	git diff "$@"
     fi
@@ -2767,7 +2783,6 @@ declare -A UNOFFICIAL_COMMANDS=(
     [c]=gh_commands
     [checkout]=gh_checkout
     [co]=gh_checkout
-    [commands]=gh_commands
     [di]=gh_diff
     [diff]=gh_diff
     [head]=gh_head
@@ -2792,6 +2807,7 @@ declare -A UNOFFICIAL_COMMANDS=(
 declare -A DANGEROUS_COMMANDS=(
     [--help]=gh_help
     [-h]=gh_help
+    [clean]=gh_clean
     [orgs]=gh_orgs
     [repos]=gh_repos
     [rest]=gh_rest)
