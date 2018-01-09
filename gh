@@ -30,9 +30,11 @@ declare -A COMMANDS=(
     
 declare ECHO_COMMAND=false
 
+declare PREVIEW=false
+
 # Generic global variables to hold output from functions
 declare OUT="" OUT2="" OUT3="" OUT4="" OUT5="" OUT6=""
-declare -a OUTA=()
+declare -a OUTA=() OUTA2=()
 declare -A OUTH=()
 
 function Usage {
@@ -65,7 +67,8 @@ COMMANDS
        --assignee|-a ASSIGNEE, assign PR to ASSIGNEE
        --comment|-c COMMENT, add comment
        --merge|-m, merge pull request, delete branch, and check out master
-       --ptal|-p, ask assignees to take another look at the PR
+       --ptal|-p, ask reviewers and assignees to take another look at the PR
+       --reviewers|-r REVIEWERS, comma-separated list of reviewers
 EOF
 
     exit 1
@@ -149,6 +152,45 @@ function Format {
     done
 
     OUT="$text"
+}
+
+function SplitBy {
+    local strings="$1"
+    local separator="$2"
+
+    local -a array=()
+
+    # TODO: It may be easier to use IFS, but making sure it's unchanged on
+    # return is painful.
+
+    if (( ${#strings} > 0 ))
+    then
+	local suffix="$strings"
+	while true
+	do
+	    local string="${suffix%%$separator*}"
+
+	    # If suffix doesn't contain separator, string equals suffix. In
+	    # either case, it is correct to...
+	    array+=("$string")
+
+	    if test "$string" == "$suffix"
+	    then
+		break
+	    fi
+
+	    local new_suffix="${suffix#$string$separator}"
+	    if test "$new_suffix" == "$suffix"
+	    then
+		Fail "Internal error: Unable to split '$strings' by " \
+		     "'$separator'"
+	    fi
+
+	    suffix="$new_suffix"
+	done
+    fi
+
+    OUTA=("${array[@]}")
 }
 
 function Extract {
@@ -427,6 +469,13 @@ function Curl {
     local command_file="$save_dir/$url_filename.command"
     local response_file="$save_dir/$url_filename.response"
 
+    if $PREVIEW
+    then
+	local accept=application/vnd.github.thor-preview+json
+    else
+	local accept=application/vnd.github.v3+json
+    fi
+
     local -a command=(
 	curl
 	--silent
@@ -434,7 +483,7 @@ function Curl {
 	--output "$response_file"
 	--write-out "%{http_code}"
 	-H "Content-Type: application/json"
-	-H "Accept: application/vnd.github.v3+json"
+	-H "Accept: $accept"
 	-H "Authorization: token $token"
 	"${args[@]}"
 	"$url"
@@ -692,7 +741,7 @@ query {
 
 	JqRaw ".data.repositoryOwner.repositories.pageInfo.endCursor" \
 	      "$response_json"
-	local end_cursor="$OUT"
+<	local end_cursor="$OUT"
 
 	if ! Match '^[a-zA-Z0-9=]+$' "$end_cursor"
 	then
@@ -1597,7 +1646,7 @@ function gh_help_checkin {
 
 function gh_checkin {
     local approve=false assignee="" comment="" merge=false ptal=false title=""
-    local escaped_edit_option=
+    local escaped_edit_option= reviewers=""
     while (( $# > 0 ))
     do
 	case "$1" in
@@ -1629,6 +1678,10 @@ function gh_checkin {
 	    -p|--ptal)
 		ptal=true
 		shift
+		;;
+	    -r|--reviewers)
+		reviewers="$2"
+		shift 2
 		;;
 	    -*) UsageError checkin "Unknown option '$1'" ;;
 	    *) break ;;
@@ -1716,14 +1769,9 @@ function gh_checkin {
 	echo "Created pull request $url"
     fi
 
-    if test "$assignee" != ""
-    then
-	LookupAssignee "$endpoint" "$owner" "$repo" "$assignee"
-	assignee="$OUT"
-    fi
-
     WaitForChecksThen "$endpoint" "$owner" "$repo" "$number" \
-		      "$approve" "$comment" "$assignee" "$merge" "$ptal"
+		      "$approve" "$comment" "$assignee" "$merge" "$ptal" \
+		      "$reviewers"
 }
 
 function gh_undo {
@@ -1937,6 +1985,13 @@ function TryGetPullRequest {
           login
         }
       }
+      reviewRequests(first: 100) {
+        nodes {
+          reviewer {
+            login
+          }
+        }
+      }
       comments(last:1) {
         pageInfo {
           endCursor
@@ -2013,11 +2068,15 @@ function TryGetPullRequest {
     JqRawLines ".assignees.nodes[].login" "$json"
     local -a assignees=("${OUTA[@]}")
 
+    JqRawLines ".reviewRequests.nodes[].reviewer.login" "$json"
+    local -a reviewers=("${OUTA[@]}")
+
     OUT="$branch"
     OUT2="$head_commit"
     OUT3="$url"
     OUT4="$last_comment_id"
     OUTA=("${assignees[@]}")
+    OUTA2=("${reviewers[@]}")
 }
 
 function GetPullRequest {
@@ -2522,15 +2581,44 @@ function WaitForChecksThen {
 
     local approve="$5"
     local comment="$6"
-    local assignee="$7"
+    local assignee="$7" # Possibly bad
     local merge="$8"
     local ptal="$9"
+    local reviewers_string="${10}" # Possibly bad
+
+    if test "$assignee" != ""
+    then
+	LookupAssignee "$endpoint" "$owner" "$repo" "$assignee"
+	assignee="$OUT"
+    fi
+
+    if test "$reviewers_string" != ""
+    then
+	SplitBy "$reviewers_string" ,
+	local -a reviewers=("${OUTA[@]}")
+
+	reviewers_string=""
+
+	local reviewer
+	for reviewer in "${reviewers[@]}"
+	do
+	    LookupReviewer "$endpoint" "$owner" "$repo" "$reviewer"
+
+	    if test -z "$reviewers_string"
+	    then
+		reviewers_string="$OUT"
+	    else
+		reviewers_string+=,"$OUT"
+	    fi
+	done
+    fi
 
     GetPullRequest "$endpoint" "$owner" "$repo" "$number"
     local branch="$OUT"
     local commit="$OUT2"
     local last_comment_id="$OUT4"
     local -a assignees=("${OUTA[@]}")
+    local -a current_reviewers=("${OUTA2[@]}")
 
     WaitForChecks "$endpoint" "$owner" "$repo" "$number" "$commit" \
 		  "$last_comment_id"
@@ -2541,6 +2629,12 @@ function WaitForChecksThen {
 	echo "$assignee assigned to PR"
     fi
 
+    if test "$reviewers_string" != ""
+    then
+	AddReviewers "$endpoint" "$owner" "$repo" "$number" "$reviewers_string"
+	echo "$reviewers_string set to review PR"
+    fi
+
     if test "$comment" != ""
     then
 	AddPullRequestComment "$endpoint" "$owner" "$repo" "$number" "$comment"
@@ -2548,9 +2642,27 @@ function WaitForChecksThen {
 
     if $ptal
     then
+	ResolveEndpoint "$endpoint"
+	local user="$OUT2"
+
+	local -A ptal_logins=()
+	local login
+	for login in "${assignees[@]}" "${current_reviewers[@]}"
+	do
+	    if test "$login" != "$user"
+	    then
+		ptal_logins["$login"]=1
+	    fi
+	done
+
+	if (( ${#ptal_logins[@]} == 0 ))
+	then
+	    UsageError "There are no reviewers to ask for PTAL from"
+	fi
+
 	# Printing happens in function
-	Ptal "$endpoint" "$owner" "$repo" "$number" "${assignees[@]}"
-	echo "Asked for PTAL from: ${assignees[*]}"
+	Ptal "$endpoint" "$owner" "$repo" "$number" "${!ptal_logins[@]}"
+	echo "Asked for PTAL from: ${!ptal_logins[*]}"
     fi
 
     if $approve
@@ -2635,43 +2747,55 @@ function GetMentionableUsers {
 }
 
 function LookupAssignee {
+    LookupLogin assignee "$@"
+}
+
+function LookupReviewer {
+    LookupLogin reviewer "$@"
+}
+
+function LookupLogin {
+    local description="$1" # e.g. reviewer or assignee
+    shift
     local endpoint="$1"
     local owner="$2"
     local repo="$3"
-    local assignee="$4"
+    local name_or_login="$4"
 
-    if test "$assignee" == ""
+    if test "$name_or_login" == ""
     then
-	Fail "Assignee cannot be empty"
+	Fail "${description^} cannot be empty"
     fi
 
     GetMentionableUsers "$endpoint" "$owner" "$repo"
     local users_arrayish="$OUT"
 
-    ToJsonString "$assignee"
-    local assignee_json="$OUT"
+    ToJsonString "$name_or_login"
+    local name_or_login_json="$OUT"
 
-    JqRawLines "select(.login == $assignee_json) | .login" "$users_arrayish"
+    JqRawLines "select(.login == $name_or_login_json) | .login" \
+	       "$users_arrayish"
     local -a matches=("${OUTA[@]}")
 
     case "${#matches[@]}" in
 	0)
-	    Jq "select(.name != null) | select(.name | test($assignee_json; \"i\"))" "$users_arrayish"
+	    Jq "select(.name != null) | select(.name | test($name_or_login_json; \"i\"))" \
+	       "$users_arrayish"
 	    local result="$OUT"
 	    
 	    JqRawLines ".login" "$result"
 	    matches=("${OUTA[@]}")
 
 	    case "${#matches[@]}" in
-		0) Fail "No assignee found with login '$assignee' nor " \
-			"name matching '$assignee'" ;;
+		0) Fail "No $description found with login '$name_or_login' " \
+			"nor name matching '$name_or_login'" ;;
 		1)
 		    local login="${matches[0]}"
 
 		    JqRaw ".name" "$result"
 		    local name="$OUT"
 		    
-		    read -n1 -p "Found '$name' ($login) matching '$assignee', ok? [Y/n] "
+		    read -n1 -p "Found '$name' ($login) matching '$name_or_login', ok? [Y/n] "
 		    if test "$REPLY" != ""
 		    then
 			echo
@@ -2681,17 +2805,17 @@ function LookupAssignee {
 			fi
 		    fi
 	    	    ;;
-		*) Fail "Found several assignees with names matching " \
-			"'$assignee': ${matches[*]}" ;;
+		*) Fail "Found several ${description}s with names matching " \
+			"'$name_or_login': ${matches[*]}" ;;
 	    esac
 	    ;;
 	1) local login="${matches[0]}" ;;
-	*) Fail "Found several assignees with login '$assignees'!?" ;;
+	*) Fail "Found several ${description}s with login '$name_or_login'!?" ;;
     esac
 
     if ! [[ "$login" =~ ^[a-z0-9]+$ ]]
     then
-	Fail "Bad login name '$login' found for assignee '$assignee'"
+	Fail "Bad login name '$login' found for $description '$name_or_login'"
     fi
 
     OUT="$login"
@@ -2730,8 +2854,43 @@ function GetReviewers {
     local json="$OUT"
 }
 
+function gh_exec {
+    "$@"
+}
+
+function AddReviewers {
+    local endpoint="$1"
+    local owner="$2"
+    local repo="$3"
+    local pr_number="$4"
+    local comma_separated_list_of_reviewers="$5"
+    
+    SplitBy "$comma_separated_list_of_reviewers" ,
+    local -a reviewers=("${OUTA[@]}")
+
+    local escaped_reviewers_list=""
+
+    local reviewer
+    for reviewer in "${reviewers[@]}"
+    do
+	ToJsonString "$reviewer"
+	local escaped_reviewer="$OUT"
+
+	if test -z "$escaped_reviewers_list"
+	then
+	    escaped_reviewers_list="$escaped_reviewer"
+	else
+	    escaped_reviewers_list+=,"$escaped_reviewer"
+	fi
+    done
+
+    local data="{\"reviewers\": [ $escaped_reviewers_list ]}"
+    local path=/repos/"$owner"/"$repo"/pulls/"$pr_number"/requested_reviewers
+    PostRest "$endpoint" "$path" -d "$data"
+}
+
 function gh_wait {
-    local assignee= approve=false comment= merge=false ptal=false
+    local assignee= approve=false comment= merge=false ptal=false reviewers=
     while (($# > 0))
     do
 	case "$1" in
@@ -2754,6 +2913,10 @@ function gh_wait {
 	    -p|--ptal)
 		ptal=true
 		shift
+		;;
+	    -r|--reviewers)
+		reviewers="$2"
+		shift 2
 		;;
 	    *)
 		break
@@ -2800,14 +2963,9 @@ function gh_wait {
 	UsageError wait "Please specify which pull request to wait for"
     fi
 
-    if test "$assignee" != ""
-    then
-	LookupAssignee "$endpoint" "$owner" "$repo" "$assignee"
-	assignee="$OUT"
-    fi
-
     WaitForChecksThen "$endpoint" "$owner" "$repo" "$number" \
-		      "$approve" "$comment" "$assignee" "$merge" "$ptal"
+		      "$approve" "$comment" "$assignee" "$merge" "$ptal" \
+		      "$reviewers"
 }
 
 declare -A UNOFFICIAL_COMMANDS=(
@@ -2841,6 +2999,7 @@ declare -A DANGEROUS_COMMANDS=(
     [--help]=gh_help
     [-h]=gh_help
     [clean]=gh_clean
+    [exec]=gh_exec
     [orgs]=gh_orgs
     [repos]=gh_repos
     [rest]=gh_rest
