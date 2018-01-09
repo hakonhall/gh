@@ -2689,7 +2689,7 @@ function LookupAssignee {
 	*) Fail "Found several assignees with login '$assignees'!?" ;;
     esac
 
-    if ! [[ "$login" =~ ^[a-z]+$ ]]
+    if ! [[ "$login" =~ ^[a-z0-9]+$ ]]
     then
 	Fail "Bad login name '$login' found for assignee '$assignee'"
     fi
