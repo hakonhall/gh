@@ -2697,6 +2697,39 @@ function LookupAssignee {
     OUT="$login"
 }
 
+function gh_reviewers {
+    GitHubInfoFromOrigin
+    local endpoint="$OUT"
+    local owner="$OUT2"
+    local repo="$OUT3"
+    local ssh_url="$OUT4"
+
+    GetBranch
+    local branch="$OUT"
+
+    if ! GetPullRequestNumber "$endpoint" "$owner" "$repo" "$branch"
+    then
+	Fail "There's no PR number associated with working directory"
+    fi
+    local number="$OUT"
+
+    GetReviewers "$endpoint" "$owner" "$repo" "$number"
+
+    printf "%s\n" "$OUT"
+}
+
+function GetReviewers {
+    local endpoint="$1"
+    local owner="$2"
+    local repo="$3"
+    local pr_number="$4"
+    shift 4
+    
+    local path=/repos/"$owner"/"$repo"/pulls/"$pr_number"/requested_reviewers
+    GetRest "$endpoint" "$path"
+    local json="$OUT"
+}
+
 function gh_wait {
     local assignee= approve=false comment= merge=false ptal=false
     while (($# > 0))
@@ -2810,7 +2843,8 @@ declare -A DANGEROUS_COMMANDS=(
     [clean]=gh_clean
     [orgs]=gh_orgs
     [repos]=gh_repos
-    [rest]=gh_rest)
+    [rest]=gh_rest
+    [reviewers]=gh_reviewers)
 
 function Main {
     if (( $# == 0 ))
