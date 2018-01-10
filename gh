@@ -773,7 +773,7 @@ function gh_repos {
 function gh_refresh {
     if (( $# != 0 ))
     then
-	UsageError repos-refresh "Takes exactly 0 arguments"
+	UsageError refresh "Takes exactly 0 arguments"
     fi
 
     local repos_workfile="$HOME/.gh-repos.tmp"
@@ -918,7 +918,7 @@ function AssertReposFile {
     if ! test -r "$REPOS_FILE"
     then
 	Fail "Repository summary file not generated, please run " \
-	     "'gh repos-refresh'"
+	     "'gh refresh'"
     fi
 }
 
