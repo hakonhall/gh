@@ -2078,6 +2078,9 @@ function TryGetPullRequest {
     JqRawLines ".assignees.nodes[].login" "$json"
     local -a assignees=("${OUTA[@]}")
 
+    # This didn't list the reviewers on one occasion, something the explorer
+    # confirmed. Perhaps REST API would have worked? Reviewer showed on the web
+    # page.
     JqRawLines ".reviewRequests.nodes[].reviewer.login" "$json"
     local -a reviewers=("${OUTA[@]}")
 
@@ -2679,7 +2682,7 @@ function WaitForChecksThen {
 
 	if (( ${#ptal_logins[@]} == 0 ))
 	then
-	    UsageError "There are no reviewers to ask for PTAL from"
+	    UsageError wait "There are no reviewers to ask for PTAL from"
 	fi
 
 	# Printing happens in function
