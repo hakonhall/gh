@@ -243,7 +243,7 @@ function RunOrFail {
     then
 	echo -n "Command failed: "
 	EchoCommand "$@"
-	Fail "Command failed"
+	exit 1
     fi
 }
 
@@ -1765,7 +1765,7 @@ function gh_checkin {
 		   "TITLE given"
     fi
     
-    git push --quiet origin "$branch"
+    git push -q -u origin "$branch"
 
     if GetPullRequestNumber "$endpoint" "$owner" "$repo" "$branch"
     then
@@ -1874,14 +1874,64 @@ function gh_checkout {
     then
 	UsageError checkout "Command takes exactly one argument"
     fi
-    local branch="$1"
+    local branch_or_pr_number_or_pr_url="$1"
 
-    if IsClean
+    local need_to_pop=false
+    if ! IsClean
     then
-	git checkout --quiet "$branch"
-    else
 	git stash save --quiet
-	git checkout --quiet "$branch"
+	need_to_pop=true
+    fi
+
+    local pending_error_message=
+    if ! git checkout --quiet "$branch_or_pr_number_or_pr_url" 2> /dev/null
+    then
+	if PullRequestInfo "$branch_or_pr_number_or_pr_url"
+	then
+	    pr_endpoint="$OUT"
+	    pr_owner="$OUT2"
+	    pr_repo="$OUT3"
+	    pr_branch="$OUT4"
+	    pr_number="$OUT5"
+
+	    GitHubInfoFromOrigin
+	    local current_endpoint="$OUT"
+	    local current_owner="$OUT2"
+	    local current_repo="$OUT3"
+
+	    if test "$pr_endpoint" == "$current_endpoint" && \
+		    test "$pr_owner" == "$current_owner" && \
+		    test "$pr_repo" == "$current_repo"
+	    then
+		# The pull request may exist on origin but may not yet have
+		# been pulled.
+		# TODO: Verify upstream is origin.
+		git fetch -q origin
+
+		echo "Checking out branch $pr_branch"
+		if ! git checkout -q "$pr_branch"
+		then
+		    pending_error_message="Failed to check out '$pr_branch'"
+		fi
+	    else
+		pending_error_message="Pull request '$branch_or_pr_number_or_pr_url' refers to a different repository"
+	    fi
+	else
+	    pending_error_message="'$branch_or_pr_number_or_pr_url' is neither a branch, PR number, or PR URL"
+	fi
+    fi
+
+    if test -n "$pending_error_message"
+    then
+	if $need_to_pop
+	then
+	    pending_error_message+=$'\n'"Your local changes have been stashed"
+	fi
+	Fail "$pending_error_message"
+    fi
+
+    if $need_to_pop
+    then
 	git stash pop --quiet
     fi
 }
@@ -1903,11 +1953,6 @@ function gh_update {
 
     GetBranch
     local branch="$OUT"
-
-    if [ "$branch" != master ]
-    then
-	Fail "Refuse to update non-master branch"
-    fi
 
     PendingUpstreamCommits "$branch"
     local upstream="$OUT"
