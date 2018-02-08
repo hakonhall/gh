@@ -1203,39 +1203,46 @@ function gh_info {
 }
 
 function gh_load {
+    local diff_file="$DIFF_FILE"
+
     if (( $# > 0 ))
     then
-	local -a scp_options=()
-	while test "${1:0:1}" == -
-	do
-	    scp_options+=("$1")
-	    shift
-	done
+	if test -r "$1" && (( $# == 1 ))
+	then
+	    diff_file="$1"
+	else
+	    local -a scp_options=()
+	    while test "${1:0:1}" == -
+	    do
+		scp_options+=("$1")
+		shift
+	    done
 
-	if (( $# == 0 ))
-	then
-	    UsageError load "Missing hostname argument"
-	elif (( $# > 1 ))
-	then
-	    UsageError load "Too many arguments"
+	    if (( $# == 0 ))
+	    then
+		UsageError load "Missing hostname argument"
+	    elif (( $# > 1 ))
+	    then
+		UsageError load "Too many arguments"
+	    fi
+	    local hostname="$1"
+
+	    rm -f "$DIFF_FILE"
+
+	    RunOrFail scp "${scp_options[@]}" "$hostname:$DIFF_FILE" "$DIFF_FILE"
 	fi
-	local hostname="$1"
-
-	rm -f "$DIFF_FILE"
-
-	RunOrFail scp "${scp_options[@]}" "$hostname:$DIFF_FILE" "$DIFF_FILE"
     fi
 
-    if ! test -r "$DIFF_FILE"
+    if ! test -r "$diff_file"
     then
-	Fail "There is no diff file at $DIFF_FILE"
+	Fail "There is no diff file at $diff_file"
     fi
 
-    if RunOrFail git apply "$DIFF_FILE"
+    if RunOrFail git apply "$diff_file"
     then
-	echo "$DIFF_FILE has been applied"
+	echo "$diff_file has been applied"
     else
-	Fail "Failed to load $DIFF_FILE"
+	Fail "Failed to load $diff_file"
     fi
 }
 
