@@ -1457,9 +1457,27 @@ function gh_revert {
 }
 
 function gh_save {
+    case "$#" in
+	0) local diff_file="$DIFF_FILE" ;;
+	1)
+	    if [[ "$1" =~ ^[a-zA-Z0-9_-]+$ ]]
+	    then
+		local diff_file=~/.gh.diff."$1"
+	    else
+		local diff_file="$1"
+		local parent_dir=$(dirname "$diff_file")
+		if ! test -d "$parent_dir"
+		then
+		    Fail "Parent directory of '$diff_file' doesn't exist"
+		fi
+	    fi
+	    ;;
+	*) UsageError save "Too many arguments"
+    esac
+
     Stage
-    git diff HEAD > "$DIFF_FILE"
-    echo "Saved to $DIFF_FILE"
+    git diff HEAD > "$diff_file"
+    echo "Saved to $diff_file"
 }
 
 function gh_status {
