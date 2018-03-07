@@ -741,7 +741,7 @@ query {
 
 	JqRaw ".data.repositoryOwner.repositories.pageInfo.endCursor" \
 	      "$response_json"
-<	local end_cursor="$OUT"
+	local end_cursor="$OUT"
 
 	if ! Match '^[a-zA-Z0-9=]+$' "$end_cursor"
 	then
@@ -1420,19 +1420,31 @@ function gh_revert {
 	local line
 	for line in "${lines[@]}"
 	do
-	    if ! [[ "$line" =~ ^(.)'  '([^' ']+)$ ]]
+	    if [[ "$line" =~ ^(R)'  '([^' ']+)' -> '([^' ']+)$ ]]
 	    then
-		Fail "Badly formatted status line, perhaps file path " \
-		     "contains space? line: '$line'"
-	    fi
-	    local status="${BASH_REMATCH[1]}"
-	    local path="${BASH_REMATCH[2]}"
-	    path=$(realpath -m "$path")
+		local status="${BASH_REMATCH[1]}"
+		local from_path="${BASH_REMATCH[2]}"
+		local to_path="${BASH_REMATCH[3]}"
 
-	    case "$status" in
-		M|A|D) file_status["$path"]="$status" ;;
-		*) Fail "Unknown git status '$status' for '$path'" ;;
-	    esac
+		from_path=$(realpath -m "$from_path")
+		file_status["$from_path"]="$status"
+
+		to_path=$(realpath -m "$to_path")
+		file_status["$to_path"]="$status"
+	    elif [[ "$line" =~ ^(.)'  '([^' ']+)$ ]]
+	    then
+		local status="${BASH_REMATCH[1]}"
+		local path="${BASH_REMATCH[2]}"
+		path=$(realpath -m "$path")
+
+		case "$status" in
+		    M|A|D) file_status["$path"]="$status" ;;
+		    *) Fail "Unknown git status '$status' for '$path'" ;;
+		esac
+	    else
+		Fail "Badly formatted status line, perhaps file path " \
+		     "contains space or a rename? line: '$line'"
+	    fi
 	done
 
 	local path
@@ -1449,6 +1461,9 @@ function gh_revert {
 		A)
 		    Run git reset -q HEAD "$path"
 		    Run rm "$path"
+		    ;;
+		R)
+		    Fail "Modifications on renamed files is not yet supported"
 		    ;;
 		*) Fail "There's a path mismatch!?"
 	    esac
