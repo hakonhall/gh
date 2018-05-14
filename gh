@@ -58,8 +58,15 @@ COMMANDS
   commands
       Display available commands
   help [config]
+  load [P]
+      Apply diff from ~/.gh.diff. If P is specified and refers to a file,
+      use that path instead, otherwise assume P is a hostname and scp its
+      ~/.gh.diff to localhost.
   refresh
       Read $CONFIG_FILE and generate $REPOS_FILE cache.
+  save [-n NAME] [PATH...]
+      Save a diff to ~/.gh.diff. With NAME, save to ~/.gh.diff.NAME, or if NAME
+      is a path save to that path. With PATH, only save a diff of those paths.
   wait [OPTION...] [PR_URL]
       Wait for checks to pass.
       Options are applied if and after the checks pass:
@@ -1472,26 +1479,32 @@ function gh_revert {
 }
 
 function gh_save {
-    case "$#" in
-	0) local diff_file="$DIFF_FILE" ;;
-	1)
-	    if [[ "$1" =~ ^[a-zA-Z0-9_-]+$ ]]
-	    then
-		local diff_file=~/.gh.diff."$1"
-	    else
-		local diff_file="$1"
-		local parent_dir=$(dirname "$diff_file")
-		if ! test -d "$parent_dir"
+    local diff_file="$DIFF_FILE"
+
+    while (( $# > 0 ))
+    do
+	case "$1" in
+	    -n)
+		if [[ "$2" =~ ^[a-zA-Z0-9_-]+$ ]]
 		then
-		    Fail "Parent directory of '$diff_file' doesn't exist"
+		    local diff_file=~/.gh.diff."$2"
+		else
+		    local diff_file="$2"
+		    local parent_dir=$(dirname "$diff_file")
+		    if ! test -d "$parent_dir"
+		    then
+			Fail "Parent directory of '$diff_file' doesn't exist"
+		    fi
 		fi
-	    fi
-	    ;;
-	*) UsageError save "Too many arguments"
-    esac
+		shift 2
+		;;
+	    -*) Fail "Unknown option '$1'" ;;
+	    *) break ;;
+	esac
+    done
 
     Stage
-    git diff HEAD > "$diff_file"
+    git diff HEAD "$@" > "$diff_file"
     echo "Saved to $diff_file"
 }
 
@@ -1770,7 +1783,7 @@ function gh_checkin {
 	local title="$1"
 
 	branch="${title,,}"
-	branch=$(printf "%s" "$branch" | tr ' ' - | tr -Cd '[[:alnum:]-]')
+	branch=$(printf "%s" "$branch" | tr ' ' - | tr -Cd '[:alnum:]-')
 	if test "$branch" == ""
 	then
 	    Fail "Failed to find a good branch name from the title '$title'"
@@ -1783,7 +1796,12 @@ function gh_checkin {
 
 	Stage
 	git stash save --quiet --include-untracked
-	git checkout --quiet -b "$branch"
+	if ! git checkout --quiet -b "$branch"
+	then
+	    echo "Error checking out new branch!"
+	    echo "To retrieve your work, issue 'git stash pop'"
+	    exit 1
+	fi
 	git stash pop --quiet
 
 	Stage
