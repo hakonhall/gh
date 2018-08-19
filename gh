@@ -874,7 +874,10 @@ function gh_refresh {
 	done
     done
 
-    cp "$REPOS_FILE" "$OLD_REPOS_FILE"
+    if test -e "$REPOS_FILE"
+    then
+        cp "$REPOS_FILE" "$OLD_REPOS_FILE"
+    fi
     sort "$repos_workfile" > "$REPOS_FILE"
     rm "$repos_workfile"
 }
