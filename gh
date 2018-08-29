@@ -67,6 +67,8 @@ COMMANDS
   save [-n NAME] [PATH...]
       Save a diff to ~/.gh.diff. With NAME, save to ~/.gh.diff.NAME, or if NAME
       is a path save to that path. With PATH, only save a diff of those paths.
+  undo
+      Undo last commit command, i.e. set HEAD to parent without touching wd.
   wait [OPTION...] [PR_URL]
       Wait for checks to pass.
       Options are applied if and after the checks pass:
@@ -450,16 +452,19 @@ function ResolveEndpoint {
     then
 	local rest_url="https://$api_authority"
 	local graphql_url="https://$api_authority/graphql"
+	local github_feature=true
     else
 	# WARNING: This is assuming GitHub Enterprise setup
 	local rest_url="https://$api_authority/api/v3"
 	local graphql_url="https://$api_authority/api/graphql"
+	local github_feature=false
     fi
 
     OUT="$rest_url"
     OUT2="$user"
     OUT3="$token"
     OUT4="$graphql_url"
+    OUT5="$github_feature"
 }
 
 function Curl {
@@ -2093,7 +2098,44 @@ function TryGetPullRequest {
     ToJsonString "$repo"
     local repo_json="$OUT"
 
-    local query="query {
+    ResolveEndpoint "$endpoint"
+    local github_reviewer_moved="$OUT5"
+
+    if $github_reviewer_moved
+    then
+	local query="query {
+  repository(owner:$owner_json name:$repo_json) {
+    pullRequest(number:$number) {
+      assignees(first:100) {
+        nodes {
+          login
+        }
+      }
+      suggestedReviewers {
+        reviewer {
+          login
+        }
+      }
+      comments(last:1) {
+        pageInfo {
+          endCursor
+        }
+      }
+      headRef {
+        name
+        target {
+          oid
+        }
+      }
+      mergeable
+      merged
+      state
+      url
+    }
+  }
+}"
+    else
+	local query="query {
   repository(owner:$owner_json name:$repo_json) {
     pullRequest(number:$number) {
       assignees(first:100) {
@@ -2126,6 +2168,7 @@ function TryGetPullRequest {
     }
   }
 }"
+    fi
 
     QueryGraph "$endpoint" "$query"
     local json="$OUT"
@@ -2187,7 +2230,12 @@ function TryGetPullRequest {
     # This didn't list the reviewers on one occasion, something the explorer
     # confirmed. Perhaps REST API would have worked? Reviewer showed on the web
     # page.
-    JqRawLines ".reviewRequests.nodes[].reviewer.login" "$json"
+    if $github_reviewer_moved
+    then
+	JqRawLines ".suggestedReviewers[].reviewer.login" "$json"
+    else
+	JqRawLines ".reviewRequests.nodes[].reviewer.login" "$json"
+    fi
     local -a reviewers=("${OUTA[@]}")
 
     OUT="$branch"
