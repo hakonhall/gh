@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # TODO: Require jq, but only when actually needed by any command.
 
@@ -1054,7 +1054,7 @@ function PrintCommandsOfUnsorted {
 function PrintCommandsOf {
     if test -t 1
     then
-	PrintCommandsOfUnsorted "$@" | sort | pr -4 -w 80 -t -T
+	PrintCommandsOfUnsorted "$@" | sort | pr -4 -w 80 -t
     else
 	PrintCommandsOfUnsorted "$@" | sort
     fi
@@ -1081,11 +1081,21 @@ function gh_commands {
 }
 
 function gh_clone {
-    if (( $# != 1 ))
+    if (( $# == 0 ))
     then
-	UsageError clone "Exactly one argument expected"
+	UsageError clone "No pattern given"
     fi
     local pattern="$1"
+
+    local destination=""
+    if (( $# > 1 ))
+    then
+	destination="$2"
+	if (( $# > 2 ))
+	then
+	    UsageError clone "Too many arguments"
+	fi
+    fi
 
     AssertReposFile
 
@@ -1124,7 +1134,12 @@ function gh_clone {
 
     ValidateRepo "$endpoint" "$owner" "$repo"
 
-    Run git clone "$ssh_url" "$endpoint/$owner/$repo"
+    if test "$destination" == ""
+    then
+	destination="$endpoint/$owner/$repo"
+    fi
+
+    Run git clone "$ssh_url" "$destination"
 }
 
 function gh_help {
