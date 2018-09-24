@@ -1211,24 +1211,7 @@ function gh_info {
 	UsageError undo "Command takes exactly zero arguments"
     fi
 
-    GitHubInfoFromOrigin
-    local endpoint="$OUT"
-    local owner="$OUT2"
-    local repo="$OUT3"
-    local ssh_url="$OUT4"
-
-    GetBranch
-    local branch="$OUT"
-
-    if test "$branch" == master
-    then
-	local branch_text=""
-    else
-	local branch_text="#$branch"
-    fi
-
-    echo "$endpoint:$owner/$repo$branch_text$upstream_text"
-
+    gh_branch --full
     gh_status
 }
 
@@ -1921,11 +1904,13 @@ function gh_clean_branch {
 
 function gh_branch {
     local clean=false
+    local full=false # Qualify the branch name with the repo ID
 
     while (( $# > 0 ))
     do
 	case "$1" in
 	    --clean) clean=true ;;
+	    -f|--full) full=true ;;
 	    *) break ;;
 	esac
 	shift
@@ -1947,6 +1932,34 @@ function gh_branch {
     fi
 
     GetBranch
+    local branch="$OUT"
+
+    if $full
+    then
+	GitHubInfoFromOrigin
+	local endpoint="$OUT"
+	local owner="$OUT2"
+	local repo="$OUT3"
+	local ssh_url="$OUT4"
+
+	branch="$endpoint:$owner/$repo#$branch"
+    fi
+    
+    echo "$branch"
+}
+
+function GetRepoId {
+    GitHubInfoFromOrigin
+    local endpoint="$OUT"
+    local owner="$OUT2"
+    local repo="$OUT3"
+    local ssh_url="$OUT4"
+
+    OUT="$endpoint:$owner/$repo"
+}
+
+function gh_repo {
+    GetRepoId
     echo "$OUT"
 }
 
@@ -3178,6 +3191,7 @@ declare -A UNOFFICIAL_COMMANDS=(
     [is-clean]=IsClean
     [load]=gh_load
     [pending]=gh_pending
+    [repo]=gh_repo
     [resolve-pr]=gh_resolve_pr
     [resolve-wd]=gh_resolve_wd
     [revert]=gh_revert
