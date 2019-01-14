@@ -57,6 +57,9 @@ COMMANDS
       Clone ENDPOINT:OWNER/REPO matching PATTERN from $REPOS_FILE.
   commands
       Display available commands
+  diff [-m] [OPT...]
+      Diff HEAD with working directory, passing OPT to git diff. -m will diff
+      against merge base (last common ancestor to origin/master and HEAD).
   help [config]
   load [P]
       Apply diff from ~/.gh.diff. If P is specified and refers to a file,
@@ -452,19 +455,16 @@ function ResolveEndpoint {
     then
 	local rest_url="https://$api_authority"
 	local graphql_url="https://$api_authority/graphql"
-	local github_feature=true
     else
 	# WARNING: This is assuming GitHub Enterprise setup
 	local rest_url="https://$api_authority/api/v3"
 	local graphql_url="https://$api_authority/api/graphql"
-	local github_feature=false
     fi
 
     OUT="$rest_url"
     OUT2="$user"
     OUT3="$token"
     OUT4="$graphql_url"
-    OUT5="$github_feature"
 }
 
 function Curl {
@@ -2079,23 +2079,23 @@ function gh_update {
 function gh_diff {
     Stage
     
-    if (( $# == 0 ))
+    if (( $# == 0 )) && test -v DISPLAY && type diffuse &> /dev/null && test -t 1
     then
-	# Only run diffuse if we're running X, diffuse is installed, and stdout
-	# is a terminal (otherwise stdout could be 'less' or a file).
-	if test -v DISPLAY && type diffuse &> /dev/null && test -t 1
-	then
-	    # Make it easy to modify while looking at diff
-	    diffuse -m &
-	else
-	    git diff HEAD
-	fi
-    elif (( $# == 1 )) && test "$1" == -m
-    then
-        local merge_base=$(git merge-base origin/master HEAD)
-        git diff "$merge_base" HEAD
+       # Only run diffuse if we're running X, diffuse is installed, and stdout
+       # is a terminal (otherwise stdout could be 'less' or a file).
+       # Make it easy to modify while looking at diff
+       diffuse -m &
     else
-	git diff "$@"
+	local branches=()
+	if test "$1" == -m
+	then
+	    shift
+            local merge_base=$(git merge-base origin/master HEAD)
+	    branches+=("$merge_base")
+	else
+	    branches+=(HEAD)
+	fi
+	git diff "$@" "${branches[@]}"
     fi
 }
 
@@ -2127,11 +2127,8 @@ function TryGetPullRequest {
     local repo_json="$OUT"
 
     ResolveEndpoint "$endpoint"
-    local github_reviewer_moved="$OUT5"
 
-    if $github_reviewer_moved
-    then
-	local query="query {
+    local query="query {
   repository(owner:$owner_json name:$repo_json) {
     pullRequest(number:$number) {
       assignees(first:100) {
@@ -2162,41 +2159,6 @@ function TryGetPullRequest {
     }
   }
 }"
-    else
-	local query="query {
-  repository(owner:$owner_json name:$repo_json) {
-    pullRequest(number:$number) {
-      assignees(first:100) {
-        nodes {
-          login
-        }
-      }
-      reviewRequests(first: 100) {
-        nodes {
-          reviewer {
-            login
-          }
-        }
-      }
-      comments(last:1) {
-        pageInfo {
-          endCursor
-        }
-      }
-      headRef {
-        name
-        target {
-          oid
-        }
-      }
-      mergeable
-      merged
-      state
-      url
-    }
-  }
-}"
-    fi
 
     QueryGraph "$endpoint" "$query"
     local json="$OUT"
