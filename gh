@@ -2087,7 +2087,7 @@ function gh_diff {
        diffuse -m &
     else
 	local branches=()
-	if test "$1" == -m
+	if test "$1" == -m || test "$1" == --merge-base
 	then
 	    shift
             local merge_base=$(git merge-base origin/master HEAD)
