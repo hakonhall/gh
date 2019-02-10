@@ -32,10 +32,11 @@ declare ECHO_COMMAND=false
 
 declare PREVIEW=false
 
-# Generic global variables to hold output from functions
+# Generic global variables to hold input and output from functions
+declare -A INH=()
 declare OUT="" OUT2="" OUT3="" OUT4="" OUT5="" OUT6=""
 declare -a OUTA=() OUTA2=()
-declare -A OUTH=()
+declare -A OUTH=() OUTH2=()
 
 function Usage {
     local arg
@@ -769,6 +770,386 @@ query {
     Sort "${OUTA[@]}"
 }
 
+function GetStatus {
+    Stage
+
+    local -a files=()
+    local -A file_statuses=()
+
+    # The '.' will make git status ignore all modified files that are not in
+    # . or below, i.e. there are no ../ paths. If a file is moved out from
+    # (below) . to somewhere else in ../, it will be marked as D. And vice
+    # versa.
+
+    CaptureStdLines git status --short .
+    local -a lines=("${OUTA[@]}")
+
+    local line
+    for line in "${lines[@]}"
+    do
+	if [[ "$line" =~ ^R'  '([^' ']+)' -> '([^' ']+)$ ]]
+	then
+	    local from_path="${BASH_REMATCH[1]}"
+	    local to_path="${BASH_REMATCH[2]}"
+
+	    files+=("$from_path")
+	    files+=("$to_path")
+	    file_statuses["$from_path"]="D $to_path"
+	    file_statuses["$to_path"]="A $from_path"
+	elif [[ "$line" =~ ^(.)'  '([^' ']+)$ ]]
+	then
+	    local status="${BASH_REMATCH[1]}"
+	    local path="${BASH_REMATCH[2]}"
+	    files+=("$path")
+
+	    case "$status" in
+		M|A|D) file_statuses["$path"]="$status" ;;
+		*) Fail "Unknown git status '$status' for '$path'" ;;
+	    esac
+	else
+	    Fail "Badly formatted status line, perhaps file path " \
+		 "contains space or a rename? line: '$line'"
+	fi
+    done
+
+    OUTA=("${files[@]}")
+    CopyHashTo file_statuses OUTH
+}
+
+# Make the hash (associative array) named $1 a copy of the hash named $2.
+# $1 and $2 MUST NOT be named one of: from_var_name, to_var_name, keys, or key.
+function CopyHashTo {
+    local from_var_name="$1"
+    local to_var_name="$2"
+
+    eval "$to_var_name=()"
+    AddHashTo "$from_var_name" "$to_var_name"
+}
+
+# Add all key/value pairs in the hash (associative array) named $1 to the hash
+# named $2.  $1 and $2 MUST NOT be named one of: from_var_name, to_var_name,
+# keys, or key.
+function AddHashTo {
+    local from_var_name="$1"
+    local to_var_name="$2"
+
+    eval "local -a keys=(\"\${!$from_var_name[@]}\")"
+
+    local key
+    for key in "${keys[@]}"
+    do
+	eval "$to_var_name[$key]=\"\${$from_var_name[$key]}\""
+    done
+}
+
+function SelectFiles {
+
+    local -i current_index=0
+    local -A selected_files=()
+    local action=""
+
+    local -a files=()
+    local -i num_files=0
+    local -A file_statuses=()
+    local need_get_status=true
+
+    local selection_done=false
+    while ! $selection_done
+    do
+	if $need_get_status
+	then
+	    GetStatus
+	    files=("${OUTA[@]}")
+	    CopyHashTo OUTH file_statuses
+	    need_get_status=false
+
+	    num_files="${#files[@]}"
+	    if (( num_files <= 0 ))
+	    then
+		current_index=0
+		selection_done=true
+		continue
+	    elif (( current_index >= num_files ))
+	    then
+		current_index=$(( num_files - 1 ))
+	    fi
+	fi
+
+	local curren_file=""
+
+	local -i index=0
+	local file
+	for file in "${files[@]}"
+	do
+	    if test "$current_index" == "$index"
+	    then
+		local marker='>'
+		local rmarker='<'
+		current_file="$file"
+	    else
+		local marker=' '
+		local rmarker=' '
+	    fi
+
+	    if test "${selected_files[$file]}" == ""
+	    then
+		local selected=' '
+	    else
+		local selected='X'
+	    fi
+
+	    local status="${file_statuses[$file]:0:1}"
+	    local other_file="${file_statuses[$file]:2}"
+	    if (( ${#other_file} > 0 ))
+	    then
+		if test "$status" == A
+		then
+		    local annotation=" (<- $other_file)"
+		else
+		    local annotation=" (-> $other_file)"
+		fi
+	    else
+		local annotation=""
+	    fi
+
+	    printf "%s%s %2d %s %s%s %s\\n" \
+		   "$marker" \
+		   "$selected" \
+		   "$index" \
+		   "$status" \
+		   "$file" \
+		   "$annotation" \
+		   "$rmarker"
+	    index+=1
+	done
+
+	printf "%s" \
+"(d)iff, (h)elp, down/up (j/k), (q)uit, (r)evert, select (x)/(a)ll, (s)tash. "
+	local command=""
+	while true
+	do
+	    read -n 1 -r || true
+	    if test "$REPLY" == ""
+	    then
+		break
+	    else
+		command+="$REPLY"
+		if [[ "$command" =~ ^[0-9-]+$ ]]
+		then
+		    continue
+		fi
+		echo # User types a single-letter command, so insert newline
+		break # Single-letter command, interpret below
+	    fi
+	done
+
+	if [[ "$command" =~ ^([0-9]+)(-([0-9]+))?$ ]]
+	then
+	    local start_index="${BASH_REMATCH[1]}"
+	    local last_index="${BASH_REMATCH[3]}"
+	    if test "$last_index" == ""
+	    then
+		# Do not mark when only a single number was written?
+		last_index="$start_index"
+	    else
+		local -i i=start_index
+		for ((; i <= last_index; ++i))
+		do
+		    local file="${files[$i]}"
+		    if test "${selected_files[$file]}" == ""
+		    then
+			selected_files["$file"]=1
+		    else
+			unset selected_files\["$file"\]
+		    fi
+		    
+		    start_index=$(( last_index + 1 ))
+		done
+	    fi
+
+	    current_index="$last_index"
+	    if (( current_index >= num_files ))
+	    then
+		current_index=$(( num_files - 1 ))
+	    fi
+	else
+	    case "$command" in
+		a)
+		    # select all
+		    local -i num_selected=0
+		    local file
+		    for file in "${files[@]}"
+		    do
+			if test "${selected_files[$file]}" != ""
+			then
+			    num_selected+=1
+			fi
+		    done
+
+		    if (( num_selected < num_files ))
+		    then
+			for file in "${files[@]}"
+			do
+			    selected_files["$file"]=1
+			done
+		    else
+			for file in "${files[@]}"
+			do
+			    unset selected_files\["$file"\]
+			done
+		    fi
+		    ;;
+		d)
+		    # diff
+		    if (( "${#selected_files[@]}" == 0 ))
+		    then
+			git diff HEAD -- "$current_file"
+		    else
+			git diff HEAD -- "${!selected_files[@]}"
+		    fi
+		    ;;
+		h)
+		    # help
+		    cat <<EOF
+diff, revert, stash: operates on current if none are selected.
+EOF
+		    ;;
+		j)
+		    # down
+		    if (( current_index < num_files ))
+		    then
+			current_index+=1
+		    fi
+		    ;;
+		k)
+		    # up
+		    if (( current_index > 0 ))
+		    then
+			current_index+=-1
+		    fi
+		    ;;
+		q)
+		    # quit
+		    selection_done=true
+		    action=quit
+		    ;;
+		r)
+		    # revert selected files
+		    if (( "${#selected_files[@]}" == 0 ))
+		    then
+			local -a fs=("$current_file")
+		    else
+			local -a fs=("${!selected_files[@]}")
+		    fi
+
+		    local file
+		    for file in "${fs[@]}"
+		    do
+			local status="${file_statuses[$file]:0:1}"
+			case "$status" in
+			    M|D)
+				Run git reset -q HEAD "$file"
+				Run git checkout -q "$file"
+				;;
+			    A)
+				Run git reset -q HEAD "$file"
+				Run rm "$file"
+				;;
+			    R)
+				# Note: R is made into separate A and D. Should
+				# not get here.
+				Fail "Modifications on renamed files is not yet supported"
+				;;
+			    *) Fail "Unknown status '$status' for file '$file'"
+			esac
+		    done
+
+		    # Trigger another git status command to refresh file view
+		    need_get_status=true
+		    ;;
+		s)
+		    # stash selected files
+		    if (( "${#selected_files[@]}" == 0 ))
+		    then
+			local -a fs=("$current_file")
+		    else
+			local -a fs=("${!selected_files[@]}")
+		    fi
+		    echo git stash push -- "${fs[@]}"
+		    RunOrFail git stash push -- "${fs[@]}"
+
+		    # Trigger another git status command to refresh file view
+		    selected_files=()
+		    current_index=0
+		    need_get_status=true
+		    
+		    ;;
+		x)
+		    if test "${selected_files[$current_file]}" == ""
+		    then
+			selected_files["$current_file"]=1
+		    else
+			unset selected_files\["$current_file"\]
+		    fi
+		    if (( current_index < num_files ))
+		    then
+			current_index+=1
+		    fi
+		    ;;
+		y|'')
+		    # yes/confirmed ('' comes from user hitting enter)
+		    selection_done=true
+		    ;;
+	    esac
+	fi
+    done
+
+    # To get the ordering right, we need to loop over files
+    local selected_files_array=()
+    local file
+    for file in "${files[@]}"
+    do
+	if test "${selected_files[$file]}" != ""
+	then
+	    selected_files_array+=("$file")
+	fi
+    done
+
+    OUT="$action"
+    OUTA=("${selected_files_array[@]}")
+    OUTA2=("${files[@]}")
+    CopyHashTo selected_files OUTH
+    CopyHashTo file_statuses OUTH2
+}
+
+function PrintHash {
+    local PrintHash_varname="$1"
+
+    eval "local -a PrintHash_keys=(\"\${!$PrintHash_varname[@]}\")"
+
+    echo "$PrintHash_varname=("
+    local PrintHash_key
+    for PrintHash_key in "${PrintHash_keys[@]}"
+    do
+	eval "local PrintHash_value=\"\${$PrintHash_varname[\$PrintHash_key]}\""
+	printf "  [%q]=%q\n" "$PrintHash_key" "$PrintHash_value"
+    done
+    echo ")"
+}
+
+function gh_queue {
+    # gh_branch --full
+    gh i
+    git stash list
+}
+
+function gh_menu {
+    SelectFiles
+    local -a files=("${OUTA[@]}")
+    local -A statuses=()
+    CopyHashTo OUTH2 statuses
+}
+
 function gh_repos {
     if (( $# != 2 ))
     then
@@ -1216,6 +1597,12 @@ function gh_info {
 }
 
 function gh_load {
+    # <"$@"> could expand to <2>, which would mean stash id 2 would be popped.
+    # Default is <0>.
+    RunOrFail git stash pop "$@"
+}
+
+function gh_load2 {
     local diff_file="$DIFF_FILE"
 
     if (( $# > 0 ))
@@ -1485,6 +1872,17 @@ function gh_revert {
 }
 
 function gh_save {
+    local -a message_args=()
+    if test "$1" == -m || test "$1" == --message
+    then
+	message_args=(-m "$2")
+	shift 2 || true
+    fi
+
+    RunOrFail git stash push "${message_args[@]}" -- "$@"
+}
+
+function gh_save2 {
     local diff_file="$DIFF_FILE"
 
     while (( $# > 0 ))
@@ -1856,6 +2254,14 @@ function gh_undo {
 
     git reset --soft HEAD^
     Stage
+
+    # To undo the last commit on a branch you own on github:
+    # Say C is the commit hash of current HEAD, and B is the branch.
+    #   git push origin +C^:B
+    # Alternatively, if B is checked out locally:
+    #   git reset HEAD^ --hard
+    #   git push origin -f
+    # The first command would also be 'gh undo; gh revert'
 }
 
 function gh_clean_branch {
@@ -2028,6 +2434,24 @@ function gh_checkout {
     then
 	git stash pop --quiet
     fi
+}
+
+function gh_commit {
+    Stage
+    local -a edit_option=()
+    while (( $# > 0 ))
+    do
+	case "$1" in
+	    -e|--edit) edit_option=(-e); shift ;;
+	    *) break ;;
+	esac
+    done
+
+    if (( $# == 0 ))
+    then
+	UsageError "Missing commit message"
+    fi
+    git commit "${edit_option[@]}" -m "$1"
 }
 
 function gh_clean {
@@ -3140,8 +3564,9 @@ function gh_wait {
 declare -A UNOFFICIAL_COMMANDS=(
     [b]=gh_branch
     [branch]=gh_branch
-    [c]=gh_commands
+    [c]=gh_commit
     [checkout]=gh_checkout
+    [commit]=gh_commit
     [co]=gh_checkout
     [di]=gh_diff
     [diff]=gh_diff
@@ -3152,6 +3577,9 @@ declare -A UNOFFICIAL_COMMANDS=(
     [info]=gh_info
     [is-clean]=IsClean
     [load]=gh_load
+    [load2]=gh_load2
+    [m]=gh_menu
+    [menu]=gh_menu
     [pending]=gh_pending
     [repo]=gh_repo
     [resolve-pr]=gh_resolve_pr
@@ -3159,6 +3587,7 @@ declare -A UNOFFICIAL_COMMANDS=(
     [revert]=gh_revert
     [s]=gh_status
     [save]=gh_save
+    [save2]=gh_save2
     [stage]=Stage
     [status]=gh_status
     [undo]=gh_undo
@@ -3171,6 +3600,7 @@ declare -A DANGEROUS_COMMANDS=(
     [clean]=gh_clean
     [exec]=gh_exec
     [orgs]=gh_orgs
+    [q]=gh_queue
     [repos]=gh_repos
     [rest]=gh_rest
     [reviewers]=gh_reviewers)
