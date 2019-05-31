@@ -27,7 +27,7 @@ declare -A COMMANDS=(
     [help]=gh_help
     [refresh]=gh_refresh
     [wait]=gh_wait)
-    
+
 declare ECHO_COMMAND=false
 
 declare PREVIEW=false
@@ -42,7 +42,7 @@ function Usage {
     local arg
     for arg in "$@"
     do
-	printf "%s\n" "$arg"
+        printf "%s\n" "$arg"
     done
 
     cat <<EOF
@@ -68,7 +68,7 @@ COMMANDS
       ~/.gh.diff to localhost.
   refresh
       Read $CONFIG_FILE and generate $REPOS_FILE cache.
-  save [-n NAME] [PATH...]
+  save [-m MESSAGE] [PATH...]
       Save a diff to ~/.gh.diff. With NAME, save to ~/.gh.diff.NAME, or if NAME
       is a path save to that path. With PATH, only save a diff of those paths.
   undo
@@ -93,20 +93,20 @@ function UsageError {
     
     if test "$command" == ""
     then
-	local command_text=" of 'gh'"
+        local command_text=" of 'gh'"
     else
-	local command_text=" of 'gh $command'"
+        local command_text=" of 'gh $command'"
     fi
 
     Fail "Bad invocation$command_text: " "$@" \
-	     $'\n'"See '$PROGRAM help' for details"
+         $'\n'"See '$PROGRAM help' for details"
 }
 
 function Fail {
     local arg
     for arg in "$@"
     do
-	printf "%s" "$arg"
+        printf "%s" "$arg"
     done
     echo
 
@@ -121,13 +121,13 @@ function Format {
     local assignment
     for assignment in "$@"
     do
-	if ! [[ "$assignment" =~ ^(.)=(.*)$ ]]
-	then
-	    Fail "Bad specifier assignment '$assignment'"
-	fi
-	local specifier="${BASH_REMATCH[1]}"
-	local value="${BASH_REMATCH[2]}"
-	specifiers["$specifier"]="$value"
+        if ! [[ "$assignment" =~ ^(.)=(.*)$ ]]
+        then
+            Fail "Bad specifier assignment '$assignment'"
+        fi
+        local specifier="${BASH_REMATCH[1]}"
+        local value="${BASH_REMATCH[2]}"
+        specifiers["$specifier"]="$value"
     done
 
     local text=""
@@ -135,33 +135,33 @@ function Format {
     local -i i=0
     for (( ; i < ${#format}; ++i ))
     do
-	local char="${format:$i:1}"
+        local char="${format:$i:1}"
 
-	case "$state" in
-	    normal)
-		case "$char" in
-		    %) state=specifier ;;
-		    *) text+="$char" ;;
-		esac
-		;;
-	    specifier)
-		case "$char" in
-		    %)
-			text+="%"
-			state=normal
-			;;
-		    *)
-			local substitute="${specifiers[$char]}"
-			if test -z "$substitute"
-			then
-			    Fail "Bad conversion specifier '$char'"
-			fi
-			text+="$substitute"
-			state=normal
-			;;
-		esac
-		;;
-	esac
+        case "$state" in
+            normal)
+                case "$char" in
+                    %) state=specifier ;;
+                    *) text+="$char" ;;
+                esac
+                ;;
+            specifier)
+                case "$char" in
+                    %)
+                        text+="%"
+                        state=normal
+                        ;;
+                    *)
+                        local substitute="${specifiers[$char]}"
+                        if test -z "$substitute"
+                        then
+                            Fail "Bad conversion specifier '$char'"
+                        fi
+                        text+="$substitute"
+                        state=normal
+                        ;;
+                esac
+                ;;
+        esac
     done
 
     OUT="$text"
@@ -178,29 +178,29 @@ function SplitBy {
 
     if (( ${#strings} > 0 ))
     then
-	local suffix="$strings"
-	while true
-	do
-	    local string="${suffix%%$separator*}"
+        local suffix="$strings"
+        while true
+        do
+            local string="${suffix%%$separator*}"
 
-	    # If suffix doesn't contain separator, string equals suffix. In
-	    # either case, it is correct to...
-	    array+=("$string")
+            # If suffix doesn't contain separator, string equals suffix. In
+            # either case, it is correct to...
+            array+=("$string")
 
-	    if test "$string" == "$suffix"
-	    then
-		break
-	    fi
+            if test "$string" == "$suffix"
+            then
+                break
+            fi
 
-	    local new_suffix="${suffix#$string$separator}"
-	    if test "$new_suffix" == "$suffix"
-	    then
-		Fail "Internal error: Unable to split '$strings' by " \
-		     "'$separator'"
-	    fi
+            local new_suffix="${suffix#$string$separator}"
+            if test "$new_suffix" == "$suffix"
+            then
+                Fail "Internal error: Unable to split '$strings' by " \
+                     "'$separator'"
+            fi
 
-	    suffix="$new_suffix"
-	done
+            suffix="$new_suffix"
+        done
     fi
 
     OUTA=("${array[@]}")
@@ -212,18 +212,18 @@ function Extract {
 
     while read -r
     do
-	if [[ "$REPLY" =~ $regex ]]
-	then
-	    local specifiers=()
-	    local key
-	    for key in "${!BASH_REMATCH[@]}"
-	    do
-		specifiers+=("$key=${BASH_REMATCH[$key]}")
-	    done
+        if [[ "$REPLY" =~ $regex ]]
+        then
+            local specifiers=()
+            local key
+            for key in "${!BASH_REMATCH[@]}"
+            do
+                specifiers+=("$key=${BASH_REMATCH[$key]}")
+            done
 
-	    Format "$format" "${specifiers[@]}"
-	    printf "%s\n" "$OUT"
-	fi
+            Format "$format" "${specifiers[@]}"
+            printf "%s\n" "$OUT"
+        fi
     done
 }
 
@@ -234,7 +234,7 @@ function EchoCommand {
     local arg
     for arg in "$@"
     do
-	printf " %q" "$arg"
+        printf " %q" "$arg"
     done
     printf "\\n"
 }
@@ -242,7 +242,7 @@ function EchoCommand {
 function MaybeEchoCommand {
     if $ECHO_COMMAND
     then
-	EchoCommand "$@"
+        EchoCommand "$@"
     fi
 }
 
@@ -254,9 +254,9 @@ function Run {
 function RunOrFail {
     if ! "$@"
     then
-	echo -n "Command failed: "
-	EchoCommand "$@"
-	exit 1
+        echo -n "Command failed: "
+        EchoCommand "$@"
+        exit 1
     fi
 }
 
@@ -266,7 +266,7 @@ function CaptureStd {
     local out
     if ! out=$("${command[@]}" 2>&1)
     then
-	Fail "Command '${command[*]}' failed unexpectedly: '$out'"
+        Fail "Command '${command[*]}' failed unexpectedly: '$out'"
     fi
 
     OUT="$out"
@@ -279,7 +279,7 @@ function CaptureStdLines {
     local -a lines=()
     if (( ${#out} > 0 ))
     then
-	mapfile -t lines <<< "$out"
+        mapfile -t lines <<< "$out"
     fi
 
     OUTA=("${lines[@]}")
@@ -289,7 +289,7 @@ function PrintLines {
     local arg
     for arg in "$@"
     do
-	printf "%s\n" "$arg"
+        printf "%s\n" "$arg"
     done
 }
 
@@ -310,20 +310,20 @@ function Match {
 
     if test "$__Match_status" == 0
     then
-	local -i __Match_index=1
-	local __Match_variable_name
-	for __Match_variable_name in "$@"
-	do
-	    if test "$__Match_variable_name" != ""
-	    then
-		local -n __Match_variable="$__Match_variable_name"
-		__Match_variable="${BASH_REMATCH[$__Match_index]}"
-	    fi
-	    __Match_index+=1
-	done
+        local -i __Match_index=1
+        local __Match_variable_name
+        for __Match_variable_name in "$@"
+        do
+            if test "$__Match_variable_name" != ""
+            then
+                local -n __Match_variable="$__Match_variable_name"
+                __Match_variable="${BASH_REMATCH[$__Match_index]}"
+            fi
+            __Match_index+=1
+        done
     elif test "$__Match_status" != 1
     then
-	Fail "Bad regular expression: '$__Match_regex'"
+        Fail "Bad regular expression: '$__Match_regex'"
     fi
 
     return "$__Match_status"
@@ -360,8 +360,8 @@ function Jq {
     local out
     if ! out=$(jq "$@" "$jq_expression" <<< "$json" 2>&1)
     then
-	Fail "'jq' with expression '$jq_expression' failed on json '$json' " \
-	     "printing '$out'"
+        Fail "'jq' with expression '$jq_expression' failed on json '$json' " \
+             "printing '$out'"
     fi
 
     OUT="$out"
@@ -382,11 +382,11 @@ function JqRawLines {
 
     if test "$out" != ""
     then
-	while read -r
-	do
-	    local line="$REPLY"
-	    lines+=("$line")
-	done <<< "$out"
+        while read -r
+        do
+            local line="$REPLY"
+            lines+=("$line")
+        done <<< "$out"
     fi
 
     OUTA=("${lines[@]}")
@@ -395,7 +395,7 @@ function JqRawLines {
 function ReadConfigAsString {
     if ! test -e "$CONFIG_FILE"
     then
-	Fail "Please make a config file '$CONFIG_FILE'"
+        Fail "Please make a config file '$CONFIG_FILE'"
     fi
 
     OUT=$(< "$CONFIG_FILE")
@@ -427,9 +427,9 @@ function ResolveEndpoint {
     local api_authority_regex='^[a-zA-Z0-9.:-]+$'
     if ! [[ "$api_authority" =~ $api_authority_regex ]]
     then
-	Fail "Invalid api_authority found in $CONFIG_FILE for endpoint " \
-	     "'$endpoint': Is expected to match " \
-	     "'$api_authority_regex' but is '$api_authority'"
+        Fail "Invalid api_authority found in $CONFIG_FILE for endpoint " \
+             "'$endpoint': Is expected to match " \
+             "'$api_authority_regex' but is '$api_authority'"
     fi
 
     JqRaw .user "$json"
@@ -437,9 +437,9 @@ function ResolveEndpoint {
     local user_regex='^[a-zA-Z0-9_-]+$'
     if ! [[ "$user" =~ $user_regex ]]
     then
-	Fail "Invalid user found in $CONFIG_FILE for endpoint " \
-	     "'$endpoint': Is expected to match " \
-	     "'$user_regex' but is '$user'"
+        Fail "Invalid user found in $CONFIG_FILE for endpoint " \
+             "'$endpoint': Is expected to match " \
+             "'$user_regex' but is '$user'"
     fi
 
     JqRaw .token "$json"
@@ -447,19 +447,19 @@ function ResolveEndpoint {
     local token_regex='^[a-zA-Z0-9=]{40}$'
     if ! [[ "$token" =~ $token_regex ]]
     then
-	Fail "Invalid token found in $CONFIG_FILE for endpoint " \
-	     "'$endpoint': Is expected to match " \
-	     "'$token_regex' but is '$token'"
+        Fail "Invalid token found in $CONFIG_FILE for endpoint " \
+             "'$endpoint': Is expected to match " \
+             "'$token_regex' but is '$token'"
     fi
 
     if test "$api_authority" == api.github.com
     then
-	local rest_url="https://$api_authority"
-	local graphql_url="https://$api_authority/graphql"
+        local rest_url="https://$api_authority"
+        local graphql_url="https://$api_authority/graphql"
     else
-	# WARNING: This is assuming GitHub Enterprise setup
-	local rest_url="https://$api_authority/api/v3"
-	local graphql_url="https://$api_authority/api/graphql"
+        # WARNING: This is assuming GitHub Enterprise setup
+        local rest_url="https://$api_authority/api/v3"
+        local graphql_url="https://$api_authority/api/graphql"
     fi
 
     OUT="$rest_url"
@@ -484,22 +484,22 @@ function Curl {
 
     if $PREVIEW
     then
-	local accept=application/vnd.github.thor-preview+json
+        local accept=application/vnd.github.thor-preview+json
     else
-	local accept=application/vnd.github.v3+json
+        local accept=application/vnd.github.v3+json
     fi
 
     local -a command=(
-	curl
-	--silent
-	--fail
-	--output "$response_file"
-	--write-out "%{http_code}"
-	-H "Content-Type: application/json"
-	-H "Accept: $accept"
-	-H "Authorization: token $token"
-	"${args[@]}"
-	"$url"
+        curl
+        --silent
+        --fail
+        --output "$response_file"
+        --write-out "%{http_code}"
+        -H "Content-Type: application/json"
+        -H "Accept: $accept"
+        -H "Authorization: token $token"
+        "${args[@]}"
+        "$url"
     )
 
     EchoCommand "${command[@]}" > "$command_file"
@@ -510,48 +510,48 @@ function Curl {
     MaybeEchoCommand "${command[@]}"
     if http_code=$("${command[@]}")
     then
-	:
+        :
     else
-	local -i status="$?"
-	local message="Curl failed with status $status"
+        local -i status="$?"
+        local message="Curl failed with status $status"
 
-	if (( http_code > 0 ))
-	then
-	    message+=" and HTTP status code $http_code"
-	fi
+        if (( http_code > 0 ))
+        then
+            message+=" and HTTP status code $http_code"
+        fi
 
-	message+=" for command:"$'\n'$(< "$command_file")
+        message+=" for command:"$'\n'$(< "$command_file")
 
-	if test -e "$response_file"
-	then
-	    local response=$(< "$response_file")
-	    if (( ${#response} > 0 ))
-	    then
-		message+=$'\n'"With HTTP response body:"$'\n'"$response"
-	    else
-		message+=$'\n'"With empty HTTP response body"
-	    fi
-	else
-	    message+=$'\n'"With absent HTTP response body"
-	fi
+        if test -e "$response_file"
+        then
+            local response=$(< "$response_file")
+            if (( ${#response} > 0 ))
+            then
+                message+=$'\n'"With HTTP response body:"$'\n'"$response"
+            else
+                message+=$'\n'"With empty HTTP response body"
+            fi
+        else
+            message+=$'\n'"With absent HTTP response body"
+        fi
 
-	Fail "$message"
+        Fail "$message"
     fi
 
     if (( http_code < 200 || http_code >= 300 ))
     then
-	Fail "HTTP response code $http_code for command: ${command[*]}"
+        Fail "HTTP response code $http_code for command: ${command[*]}"
     fi
 
     local response
     if ! response=$(< "$response_file")
     then
-	Fail "Failed to read '$response_file'"
+        Fail "Failed to read '$response_file'"
     fi
 
     if ! jq . <<< "$response" &> /dev/null
     then
-	Fail "Response is invalid JSON: '$response'"
+        Fail "Response is invalid JSON: '$response'"
     fi
 
     OUT="$response"
@@ -619,30 +619,30 @@ function QueryGraphList {
     local cursor_text=""
     while true
     do
-	local query="$query_prefix$cursor_text$query_suffix"
-	QueryGraph "$endpoint" "$query" "$@"
-	local response="$OUT"
+        local query="$query_prefix$cursor_text$query_suffix"
+        QueryGraph "$endpoint" "$query" "$@"
+        local response="$OUT"
 
-	Jq "$jq_path" "$response"
-	local graphql_array="$OUT"
+        Jq "$jq_path" "$response"
+        local graphql_array="$OUT"
 
-	Jq '.nodes[]' "$graphql_array"
-	jq_nodes+="$OUT"$'\n'
+        Jq '.nodes[]' "$graphql_array"
+        jq_nodes+="$OUT"$'\n'
 
-	Jq .pageInfo.hasNextPage "$graphql_array"
-	local has_next_page="$OUT"
-	case "$has_next_page" in
-	    true) : ;;
-	    false) break ;;
-	    *)
-		Fail "Bad value of hasNextPage for GraphQL array " \
-		     "'$graphql_array'"
-		;;
-	esac
+        Jq .pageInfo.hasNextPage "$graphql_array"
+        local has_next_page="$OUT"
+        case "$has_next_page" in
+            true) : ;;
+            false) break ;;
+            *)
+                Fail "Bad value of hasNextPage for GraphQL array " \
+                     "'$graphql_array'"
+                ;;
+        esac
 
-	Jq .pageInfo.endCursor "$graphql_array"
-	local end_cursor_json="$OUT"
-	cursor_text=" after:$end_cursor_json"
+        Jq .pageInfo.endCursor "$graphql_array"
+        local end_cursor_json="$OUT"
+        cursor_text=" after:$end_cursor_json"
     done
 
     OUT="$jq_nodes"
@@ -688,7 +688,7 @@ query {
 function gh_orgs {
     if (( $# != 1 ))
     then
-	UsageError orgs "Expected exactly one argument: the endpoint name"
+        UsageError orgs "Expected exactly one argument: the endpoint name"
     fi
 
     local endpoint="$1"
@@ -710,7 +710,7 @@ function GetRepos {
 
     while true
     do
-	local query="
+        local query="
 query {
   repositoryOwner(login:$owner_json) {
     repositories(first:100$after_text) {
@@ -728,42 +728,42 @@ query {
   }
 }"
 
-	QueryGraph "$endpoint" "$query"
-	local response_json="$OUT"
+        QueryGraph "$endpoint" "$query"
+        local response_json="$OUT"
 
-	# The weirdest thing: With owner_json being e.g. 'hakon', I get some
-	# owner.login which are != 'hakon'. It's not clear why these extra
-	# repositories are output. Depends on permissions?
-	#
-	# Therefore, we will select only those having .owner.login equal to
-	# $owner.
+        # The weirdest thing: With owner_json being e.g. 'hakon', I get some
+        # owner.login which are != 'hakon'. It's not clear why these extra
+        # repositories are output. Depends on permissions?
+        #
+        # Therefore, we will select only those having .owner.login equal to
+        # $owner.
 
-	JqRawLines ".data.repositoryOwner.repositories.nodes[] | select(.owner.login == $owner_json) | .name" \
-		   "$response_json"
-	repos+=("${OUTA[@]}")
+        JqRawLines ".data.repositoryOwner.repositories.nodes[] | select(.owner.login == $owner_json) | .name" \
+                   "$response_json"
+        repos+=("${OUTA[@]}")
 
-	JqRaw ".data.repositoryOwner.repositories.pageInfo.hasNextPage" \
-	      "$response_json"
-	local has_next_page="$OUT"
+        JqRaw ".data.repositoryOwner.repositories.pageInfo.hasNextPage" \
+              "$response_json"
+        local has_next_page="$OUT"
 
-	case "$has_next_page" in
-	    true) : ;;
-	    false) break ;;
-	    *) Fail "Bas hasNextPage value in response: '$has_next_page'" ;;
-	esac
+        case "$has_next_page" in
+            true) : ;;
+            false) break ;;
+            *) Fail "Bas hasNextPage value in response: '$has_next_page'" ;;
+        esac
 
-	JqRaw ".data.repositoryOwner.repositories.pageInfo.endCursor" \
-	      "$response_json"
-	local end_cursor="$OUT"
+        JqRaw ".data.repositoryOwner.repositories.pageInfo.endCursor" \
+              "$response_json"
+        local end_cursor="$OUT"
 
-	if ! Match '^[a-zA-Z0-9=]+$' "$end_cursor"
-	then
-	    Fail "Bas endCursor value in response: '$end_cursor'"
-	fi
+        if ! Match '^[a-zA-Z0-9=]+$' "$end_cursor"
+        then
+            Fail "Bas endCursor value in response: '$end_cursor'"
+        fi
 
-	ToJsonString "$end_cursor"
-	local end_cursor_json="$OUT"
-	after_text=" after:$end_cursor_json"
+        ToJsonString "$end_cursor"
+        local end_cursor_json="$OUT"
+        after_text=" after:$end_cursor_json"
     done
 
     OUTA=("${repos[@]}")
@@ -787,29 +787,29 @@ function GetStatus {
     local line
     for line in "${lines[@]}"
     do
-	if [[ "$line" =~ ^R'  '([^' ']+)' -> '([^' ']+)$ ]]
-	then
-	    local from_path="${BASH_REMATCH[1]}"
-	    local to_path="${BASH_REMATCH[2]}"
+        if [[ "$line" =~ ^R'  '([^' ']+)' -> '([^' ']+)$ ]]
+        then
+            local from_path="${BASH_REMATCH[1]}"
+            local to_path="${BASH_REMATCH[2]}"
 
-	    files+=("$from_path")
-	    files+=("$to_path")
-	    file_statuses["$from_path"]="D $to_path"
-	    file_statuses["$to_path"]="A $from_path"
-	elif [[ "$line" =~ ^(.)'  '([^' ']+)$ ]]
-	then
-	    local status="${BASH_REMATCH[1]}"
-	    local path="${BASH_REMATCH[2]}"
-	    files+=("$path")
+            files+=("$from_path")
+            files+=("$to_path")
+            file_statuses["$from_path"]="D $to_path"
+            file_statuses["$to_path"]="A $from_path"
+        elif [[ "$line" =~ ^(.)'  '([^' ']+)$ ]]
+        then
+            local status="${BASH_REMATCH[1]}"
+            local path="${BASH_REMATCH[2]}"
+            files+=("$path")
 
-	    case "$status" in
-		M|A|D) file_statuses["$path"]="$status" ;;
-		*) Fail "Unknown git status '$status' for '$path'" ;;
-	    esac
-	else
-	    Fail "Badly formatted status line, perhaps file path " \
-		 "contains space or a rename? line: '$line'"
-	fi
+            case "$status" in
+                M|A|D) file_statuses["$path"]="$status" ;;
+                *) Fail "Unknown git status '$status' for '$path'" ;;
+            esac
+        else
+            Fail "Badly formatted status line, perhaps file path " \
+                 "contains space or a rename? line: '$line'"
+        fi
     done
 
     OUTA=("${files[@]}")
@@ -838,7 +838,7 @@ function AddHashTo {
     local key
     for key in "${keys[@]}"
     do
-	eval "$to_var_name[$key]=\"\${$from_var_name[$key]}\""
+        eval "$to_var_name[$key]=\"\${$from_var_name[$key]}\""
     done
 }
 
@@ -856,252 +856,257 @@ function SelectFiles {
     local selection_done=false
     while ! $selection_done
     do
-	if $need_get_status
-	then
-	    GetStatus
-	    files=("${OUTA[@]}")
-	    CopyHashTo OUTH file_statuses
-	    need_get_status=false
+        if $need_get_status
+        then
+            GetStatus
+            files=("${OUTA[@]}")
+            CopyHashTo OUTH file_statuses
+            need_get_status=false
 
-	    num_files="${#files[@]}"
-	    if (( num_files <= 0 ))
-	    then
-		current_index=0
-		selection_done=true
-		continue
-	    elif (( current_index >= num_files ))
-	    then
-		current_index=$(( num_files - 1 ))
-	    fi
-	fi
+            num_files="${#files[@]}"
+            if (( num_files <= 0 ))
+            then
+                current_index=0
+                selection_done=true
+                continue
+            elif (( current_index >= num_files ))
+            then
+                current_index=$(( num_files - 1 ))
+            fi
+        fi
 
-	local curren_file=""
+        local curren_file=""
 
-	local -i index=0
-	local file
-	for file in "${files[@]}"
-	do
-	    if test "$current_index" == "$index"
-	    then
-		local marker='>'
-		local rmarker='<'
-		current_file="$file"
-	    else
-		local marker=' '
-		local rmarker=' '
-	    fi
+        local -i index=0
+        local file
+        for file in "${files[@]}"
+        do
+            if test "$current_index" == "$index"
+            then
+                local marker='>'
+                local rmarker='<'
+                current_file="$file"
+            else
+                local marker=' '
+                local rmarker=' '
+            fi
 
-	    if test "${selected_files[$file]}" == ""
-	    then
-		local selected=' '
-	    else
-		local selected='X'
-	    fi
+            if test "${selected_files[$file]}" == ""
+            then
+                local selected=' '
+            else
+                local selected='X'
+            fi
 
-	    local status="${file_statuses[$file]:0:1}"
-	    local other_file="${file_statuses[$file]:2}"
-	    if (( ${#other_file} > 0 ))
-	    then
-		if test "$status" == A
-		then
-		    local annotation=" (<- $other_file)"
-		else
-		    local annotation=" (-> $other_file)"
-		fi
-	    else
-		local annotation=""
-	    fi
+            local status="${file_statuses[$file]:0:1}"
+            local other_file="${file_statuses[$file]:2}"
+            if (( ${#other_file} > 0 ))
+            then
+                if test "$status" == A
+                then
+                    local annotation=" (<- $other_file)"
+                else
+                    local annotation=" (-> $other_file)"
+                fi
+            else
+                local annotation=""
+            fi
 
-	    printf "%s%s %2d %s %s%s %s\\n" \
-		   "$marker" \
-		   "$selected" \
-		   "$index" \
-		   "$status" \
-		   "$file" \
-		   "$annotation" \
-		   "$rmarker"
-	    index+=1
-	done
+            printf "%s%s %2d %s %s%s %s\\n" \
+                   "$marker" \
+                   "$selected" \
+                   "$index" \
+                   "$status" \
+                   "$file" \
+                   "$annotation" \
+                   "$rmarker"
+            index+=1
+        done
 
-	printf "%s" \
-"(d)iff, (h)elp, down/up (j/k), (q)uit, (r)evert, select (x)/(a)ll, (s)tash. "
-	local command=""
-	while true
-	do
-	    read -n 1 -r || true
-	    if test "$REPLY" == ""
-	    then
-		break
-	    else
-		command+="$REPLY"
-		if [[ "$command" =~ ^[0-9-]+$ ]]
-		then
-		    continue
-		fi
-		echo # User types a single-letter command, so insert newline
-		break # Single-letter command, interpret below
-	    fi
-	done
+        printf "%s" \
+               "(d)iff, (h)elp, down/up (j/k), (q)uit, (r)evert, select (x)/(a)ll, (s)tash. "
+        local command=""
+        while true
+        do
+            read -n 1 -r || true
+            if test "$REPLY" == ""
+            then
+                break
+            else
+                command+="$REPLY"
+                if [[ "$command" =~ ^[0-9-]+$ ]]
+                then
+                    continue
+                fi
+                echo # User types a single-letter command, so insert newline
+                break # Single-letter command, interpret below
+            fi
+        done
 
-	if [[ "$command" =~ ^([0-9]+)(-([0-9]+))?$ ]]
-	then
-	    local start_index="${BASH_REMATCH[1]}"
-	    local last_index="${BASH_REMATCH[3]}"
-	    if test "$last_index" == ""
-	    then
-		# Do not mark when only a single number was written?
-		last_index="$start_index"
-	    else
-		local -i i=start_index
-		for ((; i <= last_index; ++i))
-		do
-		    local file="${files[$i]}"
-		    if test "${selected_files[$file]}" == ""
-		    then
-			selected_files["$file"]=1
-		    else
-			unset selected_files\["$file"\]
-		    fi
-		    
-		    start_index=$(( last_index + 1 ))
-		done
-	    fi
+        if [[ "$command" =~ ^([0-9]+)(-([0-9]+))?$ ]]
+        then
+            local start_index="${BASH_REMATCH[1]}"
+            local last_index="${BASH_REMATCH[3]}"
+            if test "$last_index" == ""
+            then
+                # Do not mark when only a single number was written?
+                last_index="$start_index"
+            else
+                local -i i=start_index
+                for ((; i <= last_index; ++i))
+                do
+                    local file="${files[$i]}"
+                    if test "${selected_files[$file]}" == ""
+                    then
+                        selected_files["$file"]=1
+                    else
+                        unset selected_files\["$file"\]
+                    fi
+                    
+                    start_index=$(( last_index + 1 ))
+                done
+            fi
 
-	    current_index="$last_index"
-	    if (( current_index >= num_files ))
-	    then
-		current_index=$(( num_files - 1 ))
-	    fi
-	else
-	    case "$command" in
-		a)
-		    # select all
-		    local -i num_selected=0
-		    local file
-		    for file in "${files[@]}"
-		    do
-			if test "${selected_files[$file]}" != ""
-			then
-			    num_selected+=1
-			fi
-		    done
+            current_index="$last_index"
+            if (( current_index >= num_files ))
+            then
+                current_index=$(( num_files - 1 ))
+            fi
+        else
+            case "$command" in
+                a)
+                    # select all
+                    local -i num_selected=0
+                    local file
+                    for file in "${files[@]}"
+                    do
+                        if test "${selected_files[$file]}" != ""
+                        then
+                            num_selected+=1
+                        fi
+                    done
 
-		    if (( num_selected < num_files ))
-		    then
-			for file in "${files[@]}"
-			do
-			    selected_files["$file"]=1
-			done
-		    else
-			for file in "${files[@]}"
-			do
-			    unset selected_files\["$file"\]
-			done
-		    fi
-		    ;;
-		d)
-		    # diff
-		    if (( "${#selected_files[@]}" == 0 ))
-		    then
-			git diff HEAD -- "$current_file"
-		    else
-			git diff HEAD -- "${!selected_files[@]}"
-		    fi
-		    ;;
-		h)
-		    # help
-		    cat <<EOF
+                    if (( num_selected < num_files ))
+                    then
+                        for file in "${files[@]}"
+                        do
+                            selected_files["$file"]=1
+                        done
+                    else
+                        for file in "${files[@]}"
+                        do
+                            unset selected_files\["$file"\]
+                        done
+                    fi
+                    ;;
+                d)
+                    # diff
+                    if (( "${#selected_files[@]}" == 0 ))
+                    then
+                        git diff HEAD -- "$current_file"
+                    else
+                        git diff HEAD -- "${!selected_files[@]}"
+                    fi
+                    ;;
+                h)
+                    # help
+                    cat <<EOF
 diff, revert, stash: operates on current if none are selected.
 EOF
-		    ;;
-		j)
-		    # down
-		    if (( current_index < num_files ))
-		    then
-			current_index+=1
-		    fi
-		    ;;
-		k)
-		    # up
-		    if (( current_index > 0 ))
-		    then
-			current_index+=-1
-		    fi
-		    ;;
-		q)
-		    # quit
-		    selection_done=true
-		    action=quit
-		    ;;
-		r)
-		    # revert selected files
-		    if (( "${#selected_files[@]}" == 0 ))
-		    then
-			local -a fs=("$current_file")
-		    else
-			local -a fs=("${!selected_files[@]}")
-		    fi
+                    ;;
+                j)
+                    # down
+                    if (( current_index < num_files ))
+                    then
+                        current_index+=1
+                    fi
+                    ;;
+                k)
+                    # up
+                    if (( current_index > 0 ))
+                    then
+                        current_index+=-1
+                    fi
+                    ;;
+                q)
+                    # quit
+                    selection_done=true
+                    action=quit
+                    ;;
+                r)
+                    # revert selected files
+                    if (( "${#selected_files[@]}" == 0 ))
+                    then
+                        local -a fs=("$current_file")
+                    else
+                        local -a fs=("${!selected_files[@]}")
+                    fi
 
-		    local file
-		    for file in "${fs[@]}"
-		    do
-			local status="${file_statuses[$file]:0:1}"
-			case "$status" in
-			    M|D)
-				Run git reset -q HEAD "$file"
-				Run git checkout -q "$file"
-				;;
-			    A)
-				Run git reset -q HEAD "$file"
-				Run rm "$file"
-				;;
-			    R)
-				# Note: R is made into separate A and D. Should
-				# not get here.
-				Fail "Modifications on renamed files is not yet supported"
-				;;
-			    *) Fail "Unknown status '$status' for file '$file'"
-			esac
-		    done
+                    local file
+                    for file in "${fs[@]}"
+                    do
+                        local status="${file_statuses[$file]:0:1}"
+                        case "$status" in
+                            M|D)
+                                Run git reset -q HEAD "$file"
+                                Run git checkout -q "$file"
+                                ;;
+                            A)
+                                Run git reset -q HEAD "$file"
+                                Run rm "$file"
+                                ;;
+                            R)
+                                # Note: R is made into separate A and D. Should
+                                # not get here.
+                                Fail "Modifications on renamed files is not yet supported"
+                                ;;
+                            *) Fail "Unknown status '$status' for file '$file'"
+                        esac
+                    done
 
-		    # Trigger another git status command to refresh file view
-		    need_get_status=true
-		    ;;
-		s)
-		    # stash selected files
-		    if (( "${#selected_files[@]}" == 0 ))
-		    then
-			local -a fs=("$current_file")
-		    else
-			local -a fs=("${!selected_files[@]}")
-		    fi
-		    echo git stash push -- "${fs[@]}"
-		    RunOrFail git stash push -- "${fs[@]}"
+                    # Trigger another git status command to refresh file view
+                    need_get_status=true
+                    ;;
+                s)
+                    # stash selected files
+                    if (( "${#selected_files[@]}" == 0 ))
+                    then
+                        local -a fs=("$current_file")
+                    else
+                        local -a fs=("${!selected_files[@]}")
+                    fi
 
-		    # Trigger another git status command to refresh file view
-		    selected_files=()
-		    current_index=0
-		    need_get_status=true
-		    
-		    ;;
-		x)
-		    if test "${selected_files[$current_file]}" == ""
-		    then
-			selected_files["$current_file"]=1
-		    else
-			unset selected_files\["$current_file"\]
-		    fi
-		    if (( current_index < num_files ))
-		    then
-			current_index+=1
-		    fi
-		    ;;
-		y|'')
-		    # yes/confirmed ('' comes from user hitting enter)
-		    selection_done=true
-		    ;;
-	    esac
-	fi
+                    # git stash push -- <pathspec>... will stash pathspec PLUS
+                    # ALL FILES IN INDEX.
+                    git reset HEAD
+                    echo git stash push -- "${fs[@]}"
+                    RunOrFail git stash push -- "${fs[@]}"
+                    Stage
+
+                    # Trigger another git status command to refresh file view
+                    selected_files=()
+                    current_index=0
+                    need_get_status=true
+                    
+                    ;;
+                x)
+                    if test "${selected_files[$current_file]}" == ""
+                    then
+                        selected_files["$current_file"]=1
+                    else
+                        unset selected_files\["$current_file"\]
+                    fi
+                    if (( current_index < num_files ))
+                    then
+                        current_index+=1
+                    fi
+                    ;;
+                y|'')
+                    # yes/confirmed ('' comes from user hitting enter)
+                    selection_done=true
+                    ;;
+            esac
+        fi
     done
 
     # To get the ordering right, we need to loop over files
@@ -1109,10 +1114,10 @@ EOF
     local file
     for file in "${files[@]}"
     do
-	if test "${selected_files[$file]}" != ""
-	then
-	    selected_files_array+=("$file")
-	fi
+        if test "${selected_files[$file]}" != ""
+        then
+            selected_files_array+=("$file")
+        fi
     done
 
     OUT="$action"
@@ -1131,8 +1136,8 @@ function PrintHash {
     local PrintHash_key
     for PrintHash_key in "${PrintHash_keys[@]}"
     do
-	eval "local PrintHash_value=\"\${$PrintHash_varname[\$PrintHash_key]}\""
-	printf "  [%q]=%q\n" "$PrintHash_key" "$PrintHash_value"
+        eval "local PrintHash_value=\"\${$PrintHash_varname[\$PrintHash_key]}\""
+        printf "  [%q]=%q\n" "$PrintHash_key" "$PrintHash_value"
     done
     echo ")"
 }
@@ -1153,7 +1158,7 @@ function gh_menu {
 function gh_repos {
     if (( $# != 2 ))
     then
-	UsageError repos "Command takes exactly two arguments"
+        UsageError repos "Command takes exactly two arguments"
     fi
 
     local endpoint="$1"
@@ -1166,7 +1171,7 @@ function gh_repos {
 function gh_refresh {
     if (( $# != 0 ))
     then
-	UsageError refresh "Takes exactly 0 arguments"
+        UsageError refresh "Takes exactly 0 arguments"
     fi
 
     local repos_workfile="$HOME/.gh-repos.tmp"
@@ -1178,86 +1183,86 @@ function gh_refresh {
     local endpoint
     for endpoint in "${endpoints[@]}"
     do
-	if [[ "$endpoint" =~ ' ' ]]
-	then
-	    Fail "The file format assumes endpoint '$endpoint' doesn't " \
-		 "doesn't contains space"
-	fi
+        if [[ "$endpoint" =~ ' ' ]]
+        then
+            Fail "The file format assumes endpoint '$endpoint' doesn't " \
+                 "doesn't contains space"
+        fi
 
-	GetOrgs "$endpoint"
-	local -a orgs=("${OUTA[@]}")
+        GetOrgs "$endpoint"
+        local -a orgs=("${OUTA[@]}")
 
-	ResolveEndpoint "$endpoint"
-	local user="$OUT2"
+        ResolveEndpoint "$endpoint"
+        local user="$OUT2"
 
-	local -a owners=("$user" "${orgs[@]}")
+        local -a owners=("$user" "${orgs[@]}")
 
-	# Hack:
-	#  - GraphQL DOESN'T support providing ssh_url for a repo.
-	#  - So we must use REST API.
-	#  - Either we list all repos with heavy-weight REST API, or
-	#  - as we choose to do, we get ssh_url for one repo per endpoint,
-	#    and guess the ssh_url for all others.
-	local ssh_url_prefix="" ssh_url_suffix=""
+        # Hack:
+        #  - GraphQL DOESN'T support providing ssh_url for a repo.
+        #  - So we must use REST API.
+        #  - Either we list all repos with heavy-weight REST API, or
+        #  - as we choose to do, we get ssh_url for one repo per endpoint,
+        #    and guess the ssh_url for all others.
+        local ssh_url_prefix="" ssh_url_suffix=""
 
-	local owner
-	for owner in "${owners[@]}"
-	do
-	    if [[ "$owner" =~ ' ' ]]
-	    then
-		Fail "The file format assumes owner '$owner' doesn't " \
-		     "doesn't contains space"
-	    fi
+        local owner
+        for owner in "${owners[@]}"
+        do
+            if [[ "$owner" =~ ' ' ]]
+            then
+                Fail "The file format assumes owner '$owner' doesn't " \
+                     "doesn't contains space"
+            fi
 
-	    GetRepos "$endpoint" "$owner"
-	    local -a repos=("${OUTA[@]}")
+            GetRepos "$endpoint" "$owner"
+            local -a repos=("${OUTA[@]}")
 
-	    if (( ${#repos[@]} == 0 ))
-	    then
-		# No point in proceeding
-		continue
-	    fi
+            if (( ${#repos[@]} == 0 ))
+            then
+                # No point in proceeding
+                continue
+            fi
 
-	    if test "$ssh_url_prefix" == ""
-	    then
-		local example_repo="${repos[0]}"
-		GetRest "$endpoint" "/repos/$owner/$example_repo"
-		local json="$OUT"
+            if test "$ssh_url_prefix" == ""
+            then
+                local example_repo="${repos[0]}"
+                GetRest "$endpoint" "/repos/$owner/$example_repo"
+                local json="$OUT"
 
-		JqRaw .ssh_url "$json"
-		local ssh_url="$OUT"
+                JqRaw .ssh_url "$json"
+                local ssh_url="$OUT"
 
-		# This is a terrible regex.
-		local regex="^(.*)$owner/$example_repo(.*)"
-		if ! Match "$regex" "$ssh_url" \
-		     ssh_url_prefix ssh_url_suffix
-		then
-		    Fail "Unexpected form of ssh_url doesn't match regex " \
-			 "'$regex': '$ssh_url'"
-		fi
-	    fi
+                # This is a terrible regex.
+                local regex="^(.*)$owner/$example_repo(.*)"
+                if ! Match "$regex" "$ssh_url" \
+                     ssh_url_prefix ssh_url_suffix
+                then
+                    Fail "Unexpected form of ssh_url doesn't match regex " \
+                         "'$regex': '$ssh_url'"
+                fi
+            fi
 
-	    local repo
-	    for repo in "${repos[@]}"
-	    do
-		if [[ "$repo" =~ ' ' ]]
-		then
-		    Fail "The file format assumes repo '$repo' doesn't " \
-			 "doesn't contains space"
-		fi
+            local repo
+            for repo in "${repos[@]}"
+            do
+                if [[ "$repo" =~ ' ' ]]
+                then
+                    Fail "The file format assumes repo '$repo' doesn't " \
+                         "doesn't contains space"
+                fi
 
-		local ssh_url="${ssh_url_prefix}$owner/$repo$ssh_url_suffix"
+                local ssh_url="${ssh_url_prefix}$owner/$repo$ssh_url_suffix"
 
-		if [[ "$ssh_url" =~ ' ' ]]
-		then
-		    Fail "The file format assumes ssh_url '$ssh_url' doesn't " \
-			 "doesn't contains space"
-		fi
+                if [[ "$ssh_url" =~ ' ' ]]
+                then
+                    Fail "The file format assumes ssh_url '$ssh_url' doesn't " \
+                         "doesn't contains space"
+                fi
 
-		printf "%s %s %s %s\n" "$endpoint" "$owner" "$repo" "$ssh_url" \
-		       >> "$repos_workfile"
-	    done
-	done
+                printf "%s %s %s %s\n" "$endpoint" "$owner" "$repo" "$ssh_url" \
+                       >> "$repos_workfile"
+            done
+        done
     done
 
     if test -e "$REPOS_FILE"
@@ -1275,7 +1280,7 @@ function GitHubInfoFromOrigin {
     local fetch_url_regex='^origin'$'\t''(.*) \(fetch\)$'
     if ! remote_url=$(git remote -v | Extract "$fetch_url_regex" "%1")
     then
-	Fail "Failed to get origin remote URL"
+        Fail "Failed to get origin remote URL"
     fi
 
     AssertReposFile
@@ -1283,23 +1288,23 @@ function GitHubInfoFromOrigin {
     local endpoint="" owner="" repo="" ssh_url=""
     while read -r endpoint owner repo ssh_url
     do
-	if test "$ssh_url" == "$remote_url"
-	then
-	    OUT="$endpoint"
-	    OUT2="$owner"
-	    OUT3="$repo"
-	    OUT4="$ssh_url"
-	    return
-	fi
+        if test "$ssh_url" == "$remote_url"
+        then
+            OUT="$endpoint"
+            OUT2="$owner"
+            OUT3="$repo"
+            OUT4="$ssh_url"
+            return
+        fi
     done < "$REPOS_FILE"
 
     Fail "Failed to find any repositories matching current git repo"
-}	    
+}            
 
 function gh_rest {
     if (( $# < 2 ))
     then
-	UsageError rest "Takes at least 2 arguments"
+        UsageError rest "Takes at least 2 arguments"
     fi
 
     local endpoint="$1"
@@ -1313,8 +1318,8 @@ function gh_rest {
 function AssertReposFile {
     if ! test -r "$REPOS_FILE"
     then
-	Fail "Repository summary file not generated, please run " \
-	     "'gh refresh'"
+        Fail "Repository summary file not generated, please run " \
+             "'gh refresh'"
     fi
 }
 
@@ -1324,7 +1329,7 @@ function SanityCheckEndpoint {
     local endpoint_regex='^[a-zA-Z0-9_-]+$'
     if ! [[ "$endpoint" =~ $endpoint_regex ]]
     then
-	Fail "Bad endpoint '$endpoint': Must match '$endpoint_regex'"
+        Fail "Bad endpoint '$endpoint': Must match '$endpoint_regex'"
     fi
 }
 
@@ -1334,7 +1339,7 @@ function SanityCheckOwner {
     local owner_regex='^[a-zA-Z0-9_-]+$'
     if ! [[ "$owner" =~ $owner_regex ]]
     then
-	Fail "Bad owner '$owner': Must match '$owner_regex'"
+        Fail "Bad owner '$owner': Must match '$owner_regex'"
     fi
 }
 
@@ -1344,7 +1349,7 @@ function SanityCheckRepo {
     local repo_regex='^[a-zA-Z0-9_-]+$'
     if ! [[ "$repo" =~ $repo_regex ]]
     then
-	Fail "Bad repo '$repo': Must match '$repo_regex'"
+        Fail "Bad repo '$repo': Must match '$repo_regex'"
     fi
 }
 
@@ -1361,83 +1366,83 @@ function PrintCommandsOfUnsorted {
     local table
     for table in "$@"
     do
-	# "$table" expands to e.g. "COMMANDS"
-	eval "local -a commands=(\"\${!$table[@]}\")"
-	local command
-	for command in "${commands[@]}"
-	do
-	    eval "local func=\"\${$table[$command]}\""
+        # "$table" expands to e.g. "COMMANDS"
+        eval "local -a commands=(\"\${!$table[@]}\")"
+        local command
+        for command in "${commands[@]}"
+        do
+            eval "local func=\"\${$table[$command]}\""
 
-	    if ! [[ "$func" =~ ^[a-zA-Z0-9_]+$ ]]
-	    then
-		Fail "Internal error: Bad function name '$func'"
-	    fi
+            if ! [[ "$func" =~ ^[a-zA-Z0-9_]+$ ]]
+            then
+                Fail "Internal error: Bad function name '$func'"
+            fi
 
-	    if test "${commands_by_function[$func]}" == ""
-	    then
-		commands_by_function["$func"]+="$command"
-	    else
-		commands_by_function["$func"]+=" $command"
-	    fi
-	done
+            if test "${commands_by_function[$func]}" == ""
+            then
+                commands_by_function["$func"]+="$command"
+            else
+                commands_by_function["$func"]+=" $command"
+            fi
+        done
     done
 
     local func
     for func in "${!commands_by_function[@]}"
     do
-	# Poor man's sorting...
+        # Poor man's sorting...
 
-	local -i max_length=0
-	local -A by_length=()
+        local -i max_length=0
+        local -A by_length=()
 
-	local command
-	# yes, commands_by_function is supposed to be unescaped
-	for command in ${commands_by_function["$func"]}
-	do
-	    local -i length="${#command}"
-	    # Again, poor man's sorting. Try to print proper commands first,
-	    # then long options, then short options.
-	    case "$command" in
-		--*) length+=10 ;;
-		-*) length+=0 ;;
-		*) length+=20 ;;
-	    esac
-	    if (( length > max_length ))
-	    then
-		max_length=length
-	    fi
+        local command
+        # yes, commands_by_function is supposed to be unescaped
+        for command in ${commands_by_function["$func"]}
+        do
+            local -i length="${#command}"
+            # Again, poor man's sorting. Try to print proper commands first,
+            # then long options, then short options.
+            case "$command" in
+                --*) length+=10 ;;
+                -*) length+=0 ;;
+                *) length+=20 ;;
+            esac
+            if (( length > max_length ))
+            then
+                max_length=length
+            fi
 
-	    if test "${by_length[$length]}" != ""
-	    then
-		Fail "Internal error: length of equivalent commands " \
-		     "'$command' and '${by_length[$length]}'"
-	    fi
-	    by_length["$length"]="$command"
-	done
+            if test "${by_length[$length]}" != ""
+            then
+                Fail "Internal error: length of equivalent commands " \
+                     "'$command' and '${by_length[$length]}'"
+            fi
+            by_length["$length"]="$command"
+        done
 
-	printf "%q" "${by_length[$max_length]}"
+        printf "%q" "${by_length[$max_length]}"
 
-	local -i length=$(( max_length - 1 ))
-	while (( length > 0 ))
-	do
-	    local command="${by_length[$length]}"
-	    if test "$command" != ""
-	    then
-		printf ", %q" "${by_length[$length]}"
-	    fi
-	    length=$(( length - 1 ))
-	done
+        local -i length=$(( max_length - 1 ))
+        while (( length > 0 ))
+        do
+            local command="${by_length[$length]}"
+            if test "$command" != ""
+            then
+                printf ", %q" "${by_length[$length]}"
+            fi
+            length=$(( length - 1 ))
+        done
 
-	printf "\n"
+        printf "\n"
     done
 }
 
 function PrintCommandsOf {
     if test -t 1
     then
-	PrintCommandsOfUnsorted "$@" | sort | pr -4 -w 80 -t
+        PrintCommandsOfUnsorted "$@" | sort | pr -4 -w 80 -t
     else
-	PrintCommandsOfUnsorted "$@" | sort
+        PrintCommandsOfUnsorted "$@" | sort
     fi
 }
 
@@ -1446,36 +1451,36 @@ function gh_commands {
 
     while (( $# > 0 ))
     do
-	case "$1" in
-	    -v) verbosity+=1 ;;
-	    -vv) verbosity+=2 ;;
-	    *) UsageError commands "Unknown argument '$1'" ;;
-	esac
-	shift
+        case "$1" in
+            -v) verbosity+=1 ;;
+            -vv) verbosity+=2 ;;
+            *) UsageError commands "Unknown argument '$1'" ;;
+        esac
+        shift
     done
 
     case "$verbosity" in
-	0) PrintCommandsOf COMMANDS ;;
-	1) PrintCommandsOf COMMANDS UNOFFICIAL_COMMANDS ;;
-	*) PrintCommandsOf COMMANDS UNOFFICIAL_COMMANDS DANGEROUS_COMMANDS ;;
+        0) PrintCommandsOf COMMANDS ;;
+        1) PrintCommandsOf COMMANDS UNOFFICIAL_COMMANDS ;;
+        *) PrintCommandsOf COMMANDS UNOFFICIAL_COMMANDS DANGEROUS_COMMANDS ;;
     esac
 }
 
 function gh_clone {
     if (( $# == 0 ))
     then
-	UsageError clone "No pattern given"
+        UsageError clone "No pattern given"
     fi
     local pattern="$1"
 
     local destination=""
     if (( $# > 1 ))
     then
-	destination="$2"
-	if (( $# > 2 ))
-	then
-	    UsageError clone "Too many arguments"
-	fi
+        destination="$2"
+        if (( $# > 2 ))
+        then
+            UsageError clone "Too many arguments"
+        fi
     fi
 
     AssertReposFile
@@ -1485,30 +1490,30 @@ function gh_clone {
     local endpoint owner repo ssh_url
     while read -r endpoint owner repo ssh_url
     do
-	local spec="$endpoint:$owner/$repo"
-	if [[ "$spec" =~ $pattern ]]
-	then
-	    matched_specs+=("$spec")
-	    matched_lines+=("$endpoint $owner $repo $ssh_url")
-	fi
+        local spec="$endpoint:$owner/$repo"
+        if [[ "$spec" =~ $pattern ]]
+        then
+            matched_specs+=("$spec")
+            matched_lines+=("$endpoint $owner $repo $ssh_url")
+        fi
     done < "$REPOS_FILE"
 
     local -i num_matches="${#matched_lines[@]}"
     case "$num_matches" in
-	0)
-	    Fail "Pattern '$pattern' didn't match any 'owner/repositories', " \
-		 "see $REPOS_FILE for the list of all repositories"
-	    ;;
-	1) : ;;
-	*)
-	    local message=""
-	    local spec
-	    for spec in "${matched_specs[@]}"
-	    do
-		message+=$'\n'"$spec"
-	    done
-	    Fail "Too many repository specs matched '$pattern':$message"
-	    ;;
+        0)
+            Fail "Pattern '$pattern' didn't match any 'owner/repositories', " \
+                 "see $REPOS_FILE for the list of all repositories"
+            ;;
+        1) : ;;
+        *)
+            local message=""
+            local spec
+            for spec in "${matched_specs[@]}"
+            do
+                message+=$'\n'"$spec"
+            done
+            Fail "Too many repository specs matched '$pattern':$message"
+            ;;
     esac
 
     read -r endpoint owner repo ssh_url <<< "${matched_lines[0]}"
@@ -1517,7 +1522,7 @@ function gh_clone {
 
     if test "$destination" == ""
     then
-	destination="$endpoint/$owner/$repo"
+        destination="$endpoint/$owner/$repo"
     fi
 
     Run git clone "$ssh_url" "$destination"
@@ -1526,7 +1531,7 @@ function gh_clone {
 function gh_help {
     if (( $# == 0 ))
     then
-	Usage
+        Usage
     fi
 
     local topic="$1"
@@ -1535,7 +1540,7 @@ function gh_help {
     local help_function=gh_help_"$topic"
     if ! declare -f "$help_function" &> /dev/null
     then
-	UsageError help "Unknown help topic '$topic'"
+        UsageError help "Unknown help topic '$topic'"
     fi
 
     "$help_function" "$@"
@@ -1582,14 +1587,14 @@ EOF
 function GetBranch {
     if ! OUT=$(git rev-parse --abbrev-ref HEAD)
     then
-	Fail "Failed to get branch with 'git rev-parse --abbrev-ref HEAD'"
+        Fail "Failed to get branch with 'git rev-parse --abbrev-ref HEAD'"
     fi
 }
 
 function gh_info {
     if (( $# != 0 ))
     then
-	UsageError undo "Command takes exactly zero arguments"
+        UsageError undo "Command takes exactly zero arguments"
     fi
 
     gh_branch --full
@@ -1607,42 +1612,42 @@ function gh_load2 {
 
     if (( $# > 0 ))
     then
-	if test -r "$1" && (( $# == 1 ))
-	then
-	    diff_file="$1"
-	else
-	    local -a scp_options=()
-	    while test "${1:0:1}" == -
-	    do
-		scp_options+=("$1")
-		shift
-	    done
+        if test -r "$1" && (( $# == 1 ))
+        then
+            diff_file="$1"
+        else
+            local -a scp_options=()
+            while test "${1:0:1}" == -
+            do
+                scp_options+=("$1")
+                shift
+            done
 
-	    if (( $# == 0 ))
-	    then
-		UsageError load "Missing hostname argument"
-	    elif (( $# > 1 ))
-	    then
-		UsageError load "Too many arguments"
-	    fi
-	    local hostname="$1"
+            if (( $# == 0 ))
+            then
+                UsageError load "Missing hostname argument"
+            elif (( $# > 1 ))
+            then
+                UsageError load "Too many arguments"
+            fi
+            local hostname="$1"
 
-	    rm -f "$DIFF_FILE"
+            rm -f "$DIFF_FILE"
 
-	    RunOrFail scp "${scp_options[@]}" "$hostname:$DIFF_FILE" "$DIFF_FILE"
-	fi
+            RunOrFail scp "${scp_options[@]}" "$hostname:$DIFF_FILE" "$DIFF_FILE"
+        fi
     fi
 
     if ! test -r "$diff_file"
     then
-	Fail "There is no diff file at $diff_file"
+        Fail "There is no diff file at $diff_file"
     fi
 
     if RunOrFail git apply "$diff_file"
     then
-	echo "$diff_file has been applied"
+        echo "$diff_file has been applied"
     else
-	Fail "Failed to load $diff_file"
+        Fail "Failed to load $diff_file"
     fi
 }
 
@@ -1651,15 +1656,15 @@ function PendingUpstreamCommits {
 
     local upstream=""
     if ! upstream=$(git rev-parse --symbolic-full-name "$branch"@{upstream} \
-		    2>/dev/null)
+                        2>/dev/null)
     then
-	Fail "Current branch '$branch' doesn't track any upstream"
+        Fail "Current branch '$branch' doesn't track any upstream"
     fi
 
     if ! [[ "$upstream" =~ ^refs/remotes/origin/ ]]
     then
-	Fail "Upstream of current branch ($branch) is not at 'origin' " \
-	     "remote: refuse to run"
+        Fail "Upstream of current branch ($branch) is not at 'origin' " \
+             "remote: refuse to run"
     fi
 
     RunOrFail git fetch --quiet origin
@@ -1671,7 +1676,7 @@ function PendingUpstreamCommits {
 function gh_pending {
     if (( $# != 0 ))
     then
-	UsageError undo "Command takes exactly zero arguments"
+        UsageError undo "Command takes exactly zero arguments"
     fi
 
     GetBranch
@@ -1684,9 +1689,9 @@ function gh_pending {
     local -i pending_commits="$OUT"
 
     case "$pending_commits" in
-	0) echo "There are no pending upstream commits" ;;
-	1) echo "There us 1 pending upstream commit" ;;
-	*) echo "There are $pending_commits pending upstream commits" ;;
+        0) echo "There are no pending upstream commits" ;;
+        1) echo "There us 1 pending upstream commit" ;;
+        *) echo "There are $pending_commits pending upstream commits" ;;
     esac
 }
 
@@ -1696,38 +1701,38 @@ function PullRequestInfo {
     local wrong_usage=true
     if [[ "$pr_id" =~ ^[0-9]+$ ]]
     then
-	local number="$pr_id"
+        local number="$pr_id"
 
-	GitHubInfoFromOrigin
-	local endpoint="$OUT"
-	local owner="$OUT2"
-	local repo="$OUT3"
-	
-	if TryGetPullRequest "$endpoint" "$owner" "$repo" "$number"
-	then
-	    local branch="$OUT"
-	    wrong_usage=false
-	fi
+        GitHubInfoFromOrigin
+        local endpoint="$OUT"
+        local owner="$OUT2"
+        local repo="$OUT3"
+        
+        if TryGetPullRequest "$endpoint" "$owner" "$repo" "$number"
+        then
+            local branch="$OUT"
+            wrong_usage=false
+        fi
     elif FindEndpointIfPullRequestUrl "$pr_id"
     then
-	local endpoint="$OUT"
-	local owner="$OUT2"
-	local repo="$OUT3"
-	local number="$OUT4"
-	local branch="$OUT5"
-	wrong_usage=false
+        local endpoint="$OUT"
+        local owner="$OUT2"
+        local repo="$OUT3"
+        local number="$OUT4"
+        local branch="$OUT5"
+        wrong_usage=false
     fi
 
     if $wrong_usage
     then
-	return 1
+        return 1
     else
-	OUT="$endpoint"
-	OUT2="$owner"
-	OUT3="$repo"
-	OUT4="$branch"
-	OUT5="$number"
-	return 0
+        OUT="$endpoint"
+        OUT2="$owner"
+        OUT3="$repo"
+        OUT4="$branch"
+        OUT5="$number"
+        return 0
     fi
 }
 
@@ -1735,31 +1740,31 @@ function gh_resolve_pr {
     local format=$'endpoint: %e\nowner: %o\nrepo: %r\nnumber: %n\n'
     while (( $# > 0 ))
     do
-	case "$1" in
-	    -f|--format)
-		format="$2"
-		shift 2
-		;;
-	    *) break ;;
-	esac
+        case "$1" in
+            -f|--format)
+                format="$2"
+                shift 2
+                ;;
+            *) break ;;
+        esac
     done
 
     if (( $# == 0 ))
     then
-	UsageError resolve-pr "Missing URL or number of pull request"
+        UsageError resolve-pr "Missing URL or number of pull request"
     elif (( $# > 1 ))
     then
-	UsageError resolve-pr "Too many arguments"
+        UsageError resolve-pr "Too many arguments"
     fi
     local pull_request_url_or_number="$1"
 
     if PullRequestInfo "$pull_request_url_or_number"
     then
-	Format "$format" e="$OUT" o="$OUT2" r="$OUT3" b="$OUT4" n="$OUT5"
-	printf "%s" "$OUT"
+        Format "$format" e="$OUT" o="$OUT2" r="$OUT3" b="$OUT4" n="$OUT5"
+        printf "%s" "$OUT"
     else
-	Fail "Failed to find pull request identified by " \
-	     "'$pull_request_url_or_number'"
+        Fail "Failed to find pull request identified by " \
+             "'$pull_request_url_or_number'"
     fi
 }
 
@@ -1767,18 +1772,18 @@ function gh_resolve_wd {
     local format=$'endpoint: %e\nowner: %o\nrepo: %r\nbranch: %b\nssh-url: %s\n'
     while (( $# > 0 ))
     do
-	case "$1" in
-	    -f|--format)
-		format="$2"
-		shift 2
-		;;
-	    *) break ;;
-	esac
+        case "$1" in
+            -f|--format)
+                format="$2"
+                shift 2
+                ;;
+            *) break ;;
+        esac
     done
 
     if (( $# > 0 ))
     then
-	UsageError resolve-wd "Too many arguments"
+        UsageError resolve-wd "Too many arguments"
     fi
 
     GitHubInfoFromOrigin
@@ -1805,81 +1810,93 @@ function gh_revert {
         # -d:  Remove directories
         Run git clean --quiet -fd
     else
-	# TODO: For each file in "$@", we should check it's status: whether
-	# it's added, modified, deleted (, attribute change?), and this may be
-	# different in wd vs index. The result of each such file should be an
-	# action, like remove file from index and wd.
+        # TODO: For each file in "$@", we should check it's status: whether
+        # it's added, modified, deleted (, attribute change?), and this may be
+        # different in wd vs index. The result of each such file should be an
+        # action, like remove file from index and wd.
 
-	Stage
+        Stage
 
-	local -A file_status=()
+        local -A file_status=()
 
-	CaptureStdLines git status --short
-	local -a lines=("${OUTA[@]}")
+        CaptureStdLines git status --short
+        local -a lines=("${OUTA[@]}")
 
-	local line
-	for line in "${lines[@]}"
-	do
-	    if [[ "$line" =~ ^(R)'  '([^' ']+)' -> '([^' ']+)$ ]]
-	    then
-		local status="${BASH_REMATCH[1]}"
-		local from_path="${BASH_REMATCH[2]}"
-		local to_path="${BASH_REMATCH[3]}"
+        local line
+        for line in "${lines[@]}"
+        do
+            if [[ "$line" =~ ^(R)'  '([^' ']+)' -> '([^' ']+)$ ]]
+            then
+                local status="${BASH_REMATCH[1]}"
+                local from_path="${BASH_REMATCH[2]}"
+                local to_path="${BASH_REMATCH[3]}"
 
-		from_path=$(realpath -m "$from_path")
-		file_status["$from_path"]="$status"
+                from_path=$(realpath -m "$from_path")
+                file_status["$from_path"]="$status"
 
-		to_path=$(realpath -m "$to_path")
-		file_status["$to_path"]="$status"
-	    elif [[ "$line" =~ ^(.)'  '([^' ']+)$ ]]
-	    then
-		local status="${BASH_REMATCH[1]}"
-		local path="${BASH_REMATCH[2]}"
-		path=$(realpath -m "$path")
+                to_path=$(realpath -m "$to_path")
+                file_status["$to_path"]="$status"
+            elif [[ "$line" =~ ^(.)'  '([^' ']+)$ ]]
+            then
+                local status="${BASH_REMATCH[1]}"
+                local path="${BASH_REMATCH[2]}"
+                path=$(realpath -m "$path")
 
-		case "$status" in
-		    M|A|D) file_status["$path"]="$status" ;;
-		    *) Fail "Unknown git status '$status' for '$path'" ;;
-		esac
-	    else
-		Fail "Badly formatted status line, perhaps file path " \
-		     "contains space or a rename? line: '$line'"
-	    fi
-	done
+                case "$status" in
+                    M|A|D) file_status["$path"]="$status" ;;
+                    *) Fail "Unknown git status '$status' for '$path'" ;;
+                esac
+            else
+                Fail "Badly formatted status line, perhaps file path " \
+                     "contains space or a rename? line: '$line'"
+            fi
+        done
 
-	local path
-	for path in "$@"
-	do
-	    path=$(realpath -m "$path")
+        local path
+        for path in "$@"
+        do
+            path=$(realpath -m "$path")
 
-	    local status="${file_status[$path]}"
-	    case "$status" in
-		M|D)
-		    Run git reset -q HEAD "$path"
-		    Run git checkout -q "$path"
-		    ;;
-		A)
-		    Run git reset -q HEAD "$path"
-		    Run rm "$path"
-		    ;;
-		R)
-		    Fail "Modifications on renamed files is not yet supported"
-		    ;;
-		*) Fail "There's a path mismatch!?"
-	    esac
-	done
+            local status="${file_status[$path]}"
+            case "$status" in
+                M|D)
+                    Run git reset -q HEAD "$path"
+                    Run git checkout -q "$path"
+                    ;;
+                A)
+                    Run git reset -q HEAD "$path"
+                    Run rm "$path"
+                    ;;
+                R)
+                    Fail "Modifications on renamed files is not yet supported"
+                    ;;
+                *) Fail "There's a path mismatch!?"
+            esac
+        done
     fi
 }
 
 function gh_save {
-    local -a message_args=()
-    if test "$1" == -m || test "$1" == --message
-    then
-	message_args=(-m "$2")
-	shift 2 || true
-    fi
+    local -a args=()
 
-    RunOrFail git stash push "${message_args[@]}" -- "$@"
+    while (( $# > 0 ))
+    do
+        case "$1" in
+            -H|--hunk)
+                args+=(-p)
+                shift
+                ;;
+            -m|--message)
+                args+=(-m "$2")
+                shift 2 || true
+                ;;
+            *)
+                Fail "Unknown option '$1'"
+                ;;
+        esac
+    done
+
+    RunOrFail git stash push "${args[@]}" -- "$@"
 }
 
 function gh_save2 {
@@ -1887,24 +1904,24 @@ function gh_save2 {
 
     while (( $# > 0 ))
     do
-	case "$1" in
-	    -n)
-		if [[ "$2" =~ ^[a-zA-Z0-9_-]+$ ]]
-		then
-		    local diff_file=~/.gh.diff."$2"
-		else
-		    local diff_file="$2"
-		    local parent_dir=$(dirname "$diff_file")
-		    if ! test -d "$parent_dir"
-		    then
-			Fail "Parent directory of '$diff_file' doesn't exist"
-		    fi
-		fi
-		shift 2
-		;;
-	    -*) Fail "Unknown option '$1'" ;;
-	    *) break ;;
-	esac
+        case "$1" in
+            -n)
+                if [[ "$2" =~ ^[a-zA-Z0-9_-]+$ ]]
+                then
+                    local diff_file=~/.gh.diff."$2"
+                else
+                    local diff_file="$2"
+                    local parent_dir=$(dirname "$diff_file")
+                    if ! test -d "$parent_dir"
+                    then
+                        Fail "Parent directory of '$diff_file' doesn't exist"
+                    fi
+                fi
+                shift 2
+                ;;
+            -*) Fail "Unknown option '$1'" ;;
+            *) break ;;
+        esac
     done
 
     Stage
@@ -1921,7 +1938,7 @@ function GetGitRootRelative {
     local out
     if ! out=$(git rev-parse --show-cdup 2>&1)
     then
-	Fail "Not in a git repository? 'git rev-parse --show-cdup' failed: $out"
+        Fail "Not in a git repository? 'git rev-parse --show-cdup' failed: $out"
     fi
 
     # If PWD is in root, out is empty.
@@ -1948,24 +1965,24 @@ function Stage {
     then
         # TODO: Shouldn't this be (.) ?
         root_args=()
-    elif [[ "$root" =~ ^- ]]
-    then
-        root_args=(-- "$root")
-    else
-        root_args=("$root")
-    fi
+            elif [[ "$root" =~ ^- ]]
+        then
+            root_args=(-- "$root")
+            else
+                root_args=("$root")
+        fi
 
-    Run git reset --quiet "${root_args[@]}"
-    Run git add --all "${root_args[@]}"
+            Run git reset --quiet "${root_args[@]}"
+            Run git add --all "${root_args[@]}"
 }
 
 function IsClean {
     CaptureStd git status --short
     if test "$OUT" == ""
     then
-	return 0
+        return 0
     else
-	return 1
+        return 1
     fi
 }
 
@@ -2002,16 +2019,16 @@ query {
 
     JqRaw ".data.repository.pullRequests.pageInfo.hasNextPage" "$json"
     case "$OUT" in
-	false) : ;;
-	true) Fail "More than one pull requests are open for current branch" ;;
-	*) Fail "Failed to get pull request list: '$json'" ;;
+        false) : ;;
+        true) Fail "More than one pull requests are open for current branch" ;;
+        *) Fail "Failed to get pull request list: '$json'" ;;
     esac
 
     Jq ".data.repository.pullRequests.nodes | length" "$json"
     case "$OUT" in
-	0) return 1 ;;
-	1) : ;;
-	*) Fail "Failed to get pull request list: '$json'" ;;
+        0) return 1 ;;
+        1) : ;;
+        *) Fail "Failed to get pull request list: '$json'" ;;
     esac
 
     JqRaw ".data.repository.pullRequests.nodes[].number" "$json"
@@ -2019,10 +2036,10 @@ query {
 
     if test "$number" == ""
     then
-	return 1
+        return 1
     elif ! [[ "$number" =~ ^[0-9]+$ ]]
     then
-	Fail "Failed to get pull request number: '$json'"
+        Fail "Failed to get pull request number: '$json'"
     fi
 
     JqRaw ".data.repository.pullRequests.nodes[].url" "$json"
@@ -2030,7 +2047,7 @@ query {
 
     if ! [[ "$url" =~ ^http ]]
     then
-	Fail "Failed to get pull request URL: '$json'"
+        Fail "Failed to get pull request URL: '$json'"
     fi
 
     OUT="$number"
@@ -2088,11 +2105,11 @@ function CreatePullRequest {
     body=$(git log -1 --format=%b HEAD)
     if [[ "$body" =~ ^[' '$'\n'$'\r']+$ ]]
     then
-	body=""
+        body=""
     fi
 
     RawCreatePullRequest "$destination" "$owner" "$repo" "$branch" \
-			 "$destination_branch" "$title" "$body"
+                         "$destination_branch" "$title" "$body"
     # Pass through output variables
 }
 
@@ -2106,43 +2123,43 @@ function gh_checkin {
     local escaped_edit_option= reviewers=""
     while (( $# > 0 ))
     do
-	case "$1" in
-	    --)
-		shift
-		break
-		;;
-	    -A|--approve|+1)
-		approve=true
-		shift
-		;;
-	    -a|--assignee)
-		assignee="$2"
-		shift 2
-		;;
-	    -c|--comment)
-		comment="$2"
-		shift 2
-		;;
-	    -e|--edit)
-		escaped_edit_option=--edit
-		shift
-		;;
-	    -h|--help) gh_help checkin ;;
-	    -m|--merge)
-		merge=true
-		shift
-		;;
-	    -p|--ptal)
-		ptal=true
-		shift
-		;;
-	    -r|--reviewers)
-		reviewers="$2"
-		shift 2
-		;;
-	    -*) UsageError checkin "Unknown option '$1'" ;;
-	    *) break ;;
-	esac
+        case "$1" in
+            --)
+                shift
+                break
+                ;;
+            -A|--approve|+1)
+                approve=true
+                shift
+                ;;
+            -a|--assignee)
+                assignee="$2"
+                shift 2
+                ;;
+            -c|--comment)
+                comment="$2"
+                shift 2
+                ;;
+            -e|--edit)
+                escaped_edit_option=--edit
+                shift
+                ;;
+            -h|--help) gh_help checkin ;;
+            -m|--merge)
+                merge=true
+                shift
+                ;;
+            -p|--ptal)
+                ptal=true
+                shift
+                ;;
+            -r|--reviewers)
+                reviewers="$2"
+                shift 2
+                ;;
+            -*) UsageError checkin "Unknown option '$1'" ;;
+            *) break ;;
+        esac
     done
 
     GitHubInfoFromOrigin
@@ -2155,16 +2172,16 @@ function gh_checkin {
     # creation.
     if test "$assignee" != ""
     then
-	LookupAssignee "$endpoint" "$owner" "$repo" "$assignee"
-	assignee="$OUT"
+        LookupAssignee "$endpoint" "$owner" "$repo" "$assignee"
+        assignee="$OUT"
     fi
 
     # This check has to be done before any mutable operations: the below branch
     # creation.
     if test "$reviewers" != ""
     then
-	LookupReviewers "$endpoint" "$owner" "$repo" "$reviewers"
-	reviewers="$OUT"
+        LookupReviewers "$endpoint" "$owner" "$repo" "$reviewers"
+        reviewers="$OUT"
     fi
 
     local known_to_be_dirty=false
@@ -2174,82 +2191,82 @@ function gh_checkin {
 
     if test "$branch" == master
     then
-	if IsClean
-	then
-	    Fail "On master branch, and there's nothing to commit"
-	fi
-	known_to_be_dirty=true
+        if IsClean
+        then
+            Fail "On master branch, and there's nothing to commit"
+        fi
+        known_to_be_dirty=true
 
-	if (( $# != 1 ))
-	then
-	    UsageError checkin "Missing TITLE argument"
-	fi
-	local title="$1"
+        if (( $# != 1 ))
+        then
+            UsageError checkin "Missing TITLE argument"
+        fi
+        local title="$1"
 
-	branch="${title,,}"
-	branch=$(printf "%s" "$branch" | tr ' ' - | tr -Cd '[:alnum:]-')
-	if test "$branch" == ""
-	then
-	    Fail "Failed to find a good branch name from the title '$title'"
-	fi
+        branch="${title,,}"
+        branch=$(printf "%s" "$branch" | tr ' ' - | tr -Cd '[:alnum:]-')
+        if test "$branch" == ""
+        then
+            Fail "Failed to find a good branch name from the title '$title'"
+        fi
 
-	ResolveEndpoint "$endpoint"
-	local user="$OUT2"
+        ResolveEndpoint "$endpoint"
+        local user="$OUT2"
 
-	branch="$user/$branch"
+        branch="$user/$branch"
 
-	Stage
-	git stash save --quiet --include-untracked
-	if ! git checkout --quiet -b "$branch"
-	then
-	    echo "Error checking out new branch!"
-	    echo "To retrieve your work, issue 'git stash pop'"
-	    exit 1
-	fi
-	git stash pop --quiet
+        Stage
+        git stash save --quiet --include-untracked
+        if ! git checkout --quiet -b "$branch"
+        then
+            echo "Error checking out new branch!"
+            echo "To retrieve your work, issue 'git stash pop'"
+            exit 1
+        fi
+        git stash pop --quiet
 
-	Stage
+        Stage
         git commit --quiet $escaped_edit_option -m "$title"
     elif ! IsClean
     then
-	local -a args=()
-	case "$#" in
-	    0) : ;;
-	    1) args+=(-m "$1") ;;
-	    *) UsageError checkin "Too many arguments" ;;
-	esac
+        local -a args=()
+        case "$#" in
+            0) : ;;
+            1) args+=(-m "$1") ;;
+            *) UsageError checkin "Too many arguments" ;;
+        esac
 
-	Stage
+        Stage
         git commit --quiet $escaped_edit_option "${args[@]}"
     elif (( $# != 0 ))
     then
-	UsageError checkin "Too many arguments: No local changes but " \
-		   "TITLE given"
+        UsageError checkin "Too many arguments: No local changes but " \
+                   "TITLE given"
     fi
     
     git push -q -u origin "$branch"
 
     if GetPullRequestNumber "$endpoint" "$owner" "$repo" "$branch"
     then
-	local number="$OUT"
-	local url="$OUT2"
-	echo "Found pull request $url"
+        local number="$OUT"
+        local url="$OUT2"
+        echo "Found pull request $url"
     else
-	CreatePullRequest "$endpoint" "$owner" "$repo" "$branch"
-	local number="$OUT"
-	local url="$OUT2"
-	echo "Created pull request $url"
+        CreatePullRequest "$endpoint" "$owner" "$repo" "$branch"
+        local number="$OUT"
+        local url="$OUT2"
+        echo "Created pull request $url"
     fi
 
     WaitForChecksThen "$endpoint" "$owner" "$repo" "$number" \
-		      "$approve" "$comment" "$assignee" "$merge" "$ptal" \
-		      "$reviewers"
+                      "$approve" "$comment" "$assignee" "$merge" "$ptal" \
+                      "$reviewers"
 }
 
 function gh_undo {
     if (( $# > 0 ))
     then
-	UsageError undo "Command takes exactly zero arguments"
+        UsageError undo "Command takes exactly zero arguments"
     fi
 
     git reset --soft HEAD^
@@ -2271,40 +2288,40 @@ function gh_clean_branch {
     local line
     for line in "${lines[@]}"
     do
-	if ! [[ "$line" =~ ^('* '|'  ')([^' ']+) ]]
-	then
-	    Fail "Unexpected format for line output by 'git branch': '$line'"
-	fi
+        if ! [[ "$line" =~ ^('* '|'  ')([^' ']+) ]]
+        then
+            Fail "Unexpected format for line output by 'git branch': '$line'"
+        fi
 
-	local branch="${BASH_REMATCH[2]}"
-	if test "${BASH_REMATCH[1]}" == '  '
-	then
-	    if ! git branch --quiet -d "$branch" &> /dev/null
-	    then
-		if ! read -n1 -p "Force-delete '$branch'? [Y/n] "
-		then
-		    echo
-		    Fail "Failed to read answer"
-		fi
+        local branch="${BASH_REMATCH[2]}"
+        if test "${BASH_REMATCH[1]}" == '  '
+        then
+            if ! git branch --quiet -d "$branch" &> /dev/null
+            then
+                if ! read -n1 -p "Force-delete '$branch'? [Y/n] "
+                then
+                    echo
+                    Fail "Failed to read answer"
+                fi
 
-		case "$REPLY" in
-		    "") : ;;
-		    y|Y) echo ;;
-		    *)
-			echo
-			continue
-			;;
-		esac
+                case "$REPLY" in
+                    "") : ;;
+                    y|Y) echo ;;
+                    *)
+                        echo
+                        continue
+                        ;;
+                esac
 
-		if ! git branch --quiet -D "$branch"
-		then
-		    # There should already be some error messages printed
-		    Fail "Aborting"
-		fi
-	    fi
+                if ! git branch --quiet -D "$branch"
+                then
+                    # There should already be some error messages printed
+                    Fail "Aborting"
+                fi
+            fi
 
-	    echo "Removed '$branch'"
-	fi
+            echo "Removed '$branch'"
+        fi
     done
 }
 
@@ -2314,27 +2331,27 @@ function gh_branch {
 
     while (( $# > 0 ))
     do
-	case "$1" in
-	    --clean) clean=true ;;
-	    -f|--full) full=true ;;
-	    *) break ;;
-	esac
-	shift
+        case "$1" in
+            --clean) clean=true ;;
+            -f|--full) full=true ;;
+            *) break ;;
+        esac
+        shift
     done
 
     if (( $# > 0 ))
     then
-	UsageError branch "Too many arguments"
+        UsageError branch "Too many arguments"
     fi
 
     if $clean
     then
-	if gh_clean_branch
-	then
-	    return 0
-	else
-	    return $?
-	fi
+        if gh_clean_branch
+        then
+            return 0
+        else
+            return $?
+        fi
     fi
 
     GetBranch
@@ -2342,13 +2359,13 @@ function gh_branch {
 
     if $full
     then
-	GitHubInfoFromOrigin
-	local endpoint="$OUT"
-	local owner="$OUT2"
-	local repo="$OUT3"
-	local ssh_url="$OUT4"
+        GitHubInfoFromOrigin
+        local endpoint="$OUT"
+        local owner="$OUT2"
+        local repo="$OUT3"
+        local ssh_url="$OUT4"
 
-	branch="$endpoint:$owner/$repo#$branch"
+        branch="$endpoint:$owner/$repo#$branch"
     fi
     
     echo "$branch"
@@ -2372,67 +2389,67 @@ function gh_repo {
 function gh_checkout {
     if (( $# != 1 ))
     then
-	UsageError checkout "Command takes exactly one argument"
+        UsageError checkout "Command takes exactly one argument"
     fi
     local branch_or_pr_number_or_pr_url="$1"
 
     local need_to_pop=false
     if ! IsClean
     then
-	git stash save --quiet
-	need_to_pop=true
+        git stash save --quiet
+        need_to_pop=true
     fi
 
     local pending_error_message=
     if ! git checkout --quiet "$branch_or_pr_number_or_pr_url" 2> /dev/null
     then
-	if PullRequestInfo "$branch_or_pr_number_or_pr_url"
-	then
-	    pr_endpoint="$OUT"
-	    pr_owner="$OUT2"
-	    pr_repo="$OUT3"
-	    pr_branch="$OUT4"
-	    pr_number="$OUT5"
+        if PullRequestInfo "$branch_or_pr_number_or_pr_url"
+        then
+            pr_endpoint="$OUT"
+            pr_owner="$OUT2"
+            pr_repo="$OUT3"
+            pr_branch="$OUT4"
+            pr_number="$OUT5"
 
-	    GitHubInfoFromOrigin
-	    local current_endpoint="$OUT"
-	    local current_owner="$OUT2"
-	    local current_repo="$OUT3"
+            GitHubInfoFromOrigin
+            local current_endpoint="$OUT"
+            local current_owner="$OUT2"
+            local current_repo="$OUT3"
 
-	    if test "$pr_endpoint" == "$current_endpoint" && \
-		    test "$pr_owner" == "$current_owner" && \
-		    test "$pr_repo" == "$current_repo"
-	    then
-		# The pull request may exist on origin but may not yet have
-		# been pulled.
-		# TODO: Verify upstream is origin.
-		git fetch -q origin
+            if test "$pr_endpoint" == "$current_endpoint" && \
+                    test "$pr_owner" == "$current_owner" && \
+                    test "$pr_repo" == "$current_repo"
+            then
+                # The pull request may exist on origin but may not yet have
+                # been pulled.
+                # TODO: Verify upstream is origin.
+                git fetch -q origin
 
-		echo "Checking out branch $pr_branch"
-		if ! git checkout -q "$pr_branch"
-		then
-		    pending_error_message="Failed to check out '$pr_branch'"
-		fi
-	    else
-		pending_error_message="Pull request '$branch_or_pr_number_or_pr_url' refers to a different repository"
-	    fi
-	else
-	    pending_error_message="'$branch_or_pr_number_or_pr_url' is neither a branch, PR number, or PR URL"
-	fi
+                echo "Checking out branch $pr_branch"
+                if ! git checkout -q "$pr_branch"
+                then
+                    pending_error_message="Failed to check out '$pr_branch'"
+                fi
+            else
+                pending_error_message="Pull request '$branch_or_pr_number_or_pr_url' refers to a different repository"
+            fi
+        else
+            pending_error_message="'$branch_or_pr_number_or_pr_url' is neither a branch, PR number, or PR URL"
+        fi
     fi
 
     if test -n "$pending_error_message"
     then
-	if $need_to_pop
-	then
-	    pending_error_message+=$'\n'"Your local changes have been stashed"
-	fi
-	Fail "$pending_error_message"
+        if $need_to_pop
+        then
+            pending_error_message+=$'\n'"Your local changes have been stashed"
+        fi
+        Fail "$pending_error_message"
     fi
 
     if $need_to_pop
     then
-	git stash pop --quiet
+        git stash pop --quiet
     fi
 }
 
@@ -2441,15 +2458,15 @@ function gh_commit {
     local -a edit_option=()
     while (( $# > 0 ))
     do
-	case "$1" in
-	    -e|--edit) edit_option=(-e); shift ;;
-	    *) break ;;
-	esac
+        case "$1" in
+            -e|--edit) edit_option=(-e); shift ;;
+            *) break ;;
+        esac
     done
 
     if (( $# == 0 ))
     then
-	UsageError "Missing commit message"
+        UsageError "Missing commit message"
     fi
     git commit "${edit_option[@]}" -m "$1"
 }
@@ -2466,7 +2483,7 @@ function gh_clean {
 function gh_update {
     if (( $# != 0 ))
     then
-	UsageError update "Command takes exactly zero arguments"
+        UsageError update "Command takes exactly zero arguments"
     fi
 
     GetBranch
@@ -2483,9 +2500,9 @@ function gh_update {
 
     if test "$upstream_commit" == "$branch_commit"
     then
-	# There are no upstream changes
-	echo "There were no upstream changes"
-	return
+        # There are no upstream changes
+        echo "There were no upstream changes"
+        return
     fi
 
     CaptureStd git stash --include-untracked
@@ -2496,7 +2513,7 @@ function gh_update {
     if ! [[ "$stash_output" =~ ^'No local changes to save'$ ]]
     then
         # Cannot be --quiet, since it swallows warnings about conflicts.
-	RunOrFail git stash pop
+        RunOrFail git stash pop
     fi
 }
 
@@ -2510,17 +2527,17 @@ function gh_diff {
        # Make it easy to modify while looking at diff
        diffuse -m &
     else
-	local branches=()
-	if test "$1" == -m || test "$1" == --merge-base
-	then
-	    shift
+        local branches=()
+        if test "$1" == -m || test "$1" == --merge-base
+        then
+            shift
             local merge_base=$(git merge-base origin/master HEAD)
-	    branches+=("$merge_base")
-	else
-	    branches+=(HEAD)
-	fi
-	git diff "$@" "${branches[@]}"
-    fi
+            branches+=("$merge_base")
+        else
+            branches+=(HEAD)
+        fi
+        git diff "$@" "${branches[@]}"
+fi
 }
 
 function gh_head {
@@ -2532,9 +2549,9 @@ function gh_history {
     Stage
     if type gitk &> /dev/null
     then
-	gitk
+        gitk
     else
-	git log
+        git log
     fi
 }
 
@@ -2590,52 +2607,52 @@ function TryGetPullRequest {
     Jq ".data.repository.pullRequest" "$json"
     if test "$OUT" == null
     then
-	return 1
+        return 1
     fi
     json="$OUT"
 
     JqRaw ".state" "$json"
     local state="$OUT"
     case "$state" in
-	OPEN) : ;;
-	CLOSED|MERGED)
-	    # E.g. the head commit is not available if closed, which we return
-	    # below (may not be needed?), therefore bail out here.
-	    Fail "Pull request is $state"
-	    ;;
-	*) Fail "Pull request in bad state '$state'" ;;
+        OPEN) : ;;
+        CLOSED|MERGED)
+            # E.g. the head commit is not available if closed, which we return
+            # below (may not be needed?), therefore bail out here.
+            Fail "Pull request is $state"
+            ;;
+        *) Fail "Pull request in bad state '$state'" ;;
     esac
 
     JqRaw ".headRef.name" "$json"
     local branch="$OUT"
     if ! [[ "$branch" =~ ^[a-zA-Z0-9_/-]+$ ]]
     then
-	Fail "Unexpected name of branch: '$branch'"
+        Fail "Unexpected name of branch: '$branch'"
     elif test "$branch" == master
     then
-	Fail "Pull request bound to master, refusing to proceed"
+        Fail "Pull request bound to master, refusing to proceed"
     fi
 
     JqRaw ".headRef.target.oid" "$json"
     local head_commit="$OUT"
     if ! [[ "$head_commit" =~ ^[a-f0-9]{40}$ ]]
     then
-	Fail "Unexpected format of head commit: '$head_commit'"
+        Fail "Unexpected format of head commit: '$head_commit'"
     fi
 
     JqRaw ".url" "$json"
     local url="$OUT"
     if ! [[ "$url" =~ ^http ]]
     then
-	Fail "Unexpected format of pull request URL: '$url'"
+        Fail "Unexpected format of pull request URL: '$url'"
     fi
 
     Jq ".comments" "$json"
     local last_comments_id="$OUT"
     if test "$last_comments_id" != null
     then
-	JqRaw ".comments.pageInfo.endCursor" "$json"
-	last_comment_id="$OUT"
+        JqRaw ".comments.pageInfo.endCursor" "$json"
+        last_comment_id="$OUT"
     fi
 
     JqRawLines ".assignees.nodes[].login" "$json"
@@ -2646,9 +2663,9 @@ function TryGetPullRequest {
     # page.
     if $github_reviewer_moved
     then
-	JqRawLines ".suggestedReviewers[].reviewer.login" "$json"
+        JqRawLines ".suggestedReviewers[].reviewer.login" "$json"
     else
-	JqRawLines ".reviewRequests.nodes[].reviewer.login" "$json"
+        JqRawLines ".reviewRequests.nodes[].reviewer.login" "$json"
     fi
     local -a reviewers=("${OUTA[@]}")
 
@@ -2668,7 +2685,7 @@ function GetPullRequest {
 
     if ! TryGetPullRequest "$@"
     then
-	Fail "There is no pull request $number at $endpoint:$owner/$repo"
+        Fail "There is no pull request $number at $endpoint:$owner/$repo"
     fi
 }
 
@@ -2678,7 +2695,7 @@ function FindEndpointIfPullRequestUrl {
     # Example: https://github.com/vespa-engine/vespa/pull/3937#ignored
     if ! [[ "$url" =~ ^https://([a-zA-Z0-9.-]+)(/[^?#]+)?/([^/]+)/([^/]+)/pull/([0-9]+)(\#.*)?$ ]]
     then
-	return 1
+        return 1
     fi
 
     # Remove any suffix #foo
@@ -2709,24 +2726,24 @@ function FindEndpointIfPullRequestUrl {
     local endpoint
     for endpoint in "${endpoints[@]}"
     do
-	if TryGetPullRequest "$endpoint" "$owner" "$repo" "$number"
-	then
-	    local branch="$OUT"
-	    local canonical_url="$OUT3"
+        if TryGetPullRequest "$endpoint" "$owner" "$repo" "$number"
+        then
+            local branch="$OUT"
+            local canonical_url="$OUT3"
 
-	    if test "$sub_url" != "$canonical_url"
-	    then
-		Fail "URL '$url' does not match pull request url " \
-		     "'$canonical_url'"
-	    fi
+            if test "$sub_url" != "$canonical_url"
+            then
+                Fail "URL '$url' does not match pull request url " \
+                     "'$canonical_url'"
+            fi
 
-	    OUT="$endpoint"
-	    OUT2="$owner"
-	    OUT3="$repo"
-	    OUT4="$number"
-	    OUT5="$branch"
-	    return 0
-	fi
+            OUT="$endpoint"
+            OUT2="$owner"
+            OUT3="$repo"
+            OUT4="$number"
+            OUT5="$branch"
+            return 0
+        fi
     done
 
     Fail "No endpoint in config file '$CONFIG_FILE' owns '$url'"
@@ -2739,18 +2756,18 @@ function ChecksAt {
 
     if ! Jq ".checks" "$json"
     then
-	Fail "Failed to access .checks of '$json'"
+        Fail "Failed to access .checks of '$json'"
     fi
     local checks_json="$OUT"
 
     if test "$checks_json" == null
     then
-	local has_checks=false
-	local -a checks=()
+        local has_checks=false
+        local -a checks=()
     else
-	local has_checks=true
-	JqRawLines ".checks[]" "$json"
-	local -a checks=("${OUTA[@]}")
+        local has_checks=true
+        JqRawLines ".checks[]" "$json"
+        local -a checks=("${OUTA[@]}")
     fi
 
     local has_field_value=true
@@ -2758,22 +2775,22 @@ function ChecksAt {
     local field
     for field in "${fields[@]}"
     do
-	ToJsonString "$field"
-	local field_json="$OUT"
+        ToJsonString "$field"
+        local field_json="$OUT"
 
-	if ! Jq ".$field_json" "$json"
-	then
-	    Fail "Failed to access '$field_json' of '$json'"
-	fi
-	json="$OUT"
+        if ! Jq ".$field_json" "$json"
+        then
+            Fail "Failed to access '$field_json' of '$json'"
+        fi
+        json="$OUT"
 
-	if test "$json" == null
-	then
-	    has_field_value=false
-	    break
-	else
-	    has_field_value=true
-	fi
+        if test "$json" == null
+        then
+            has_field_value=false
+            break
+        else
+            has_field_value=true
+        fi
     done
 
     OUT="$has_checks"
@@ -2800,28 +2817,28 @@ function GetChecksFor {
     local field
     for field in root endpoint owner repo
     do
-	local -n fields="${field}_fields"
+        local -n fields="${field}_fields"
 
-	ChecksAt "$json" "${fields[@]}"
-	local has_checks="$OUT"
-	if $has_checks
-	then
-	    checks=("${OUTA[@]}")
-	fi
+        ChecksAt "$json" "${fields[@]}"
+        local has_checks="$OUT"
+        if $has_checks
+        then
+            checks=("${OUTA[@]}")
+        fi
 
-	local has_field_value="$OUT2"
-	if $has_field_value
-	then
-	    json="$OUT3"
-	else
-	    break
-	fi
+        local has_field_value="$OUT2"
+        if $has_field_value
+        then
+            json="$OUT3"
+        else
+            break
+        fi
 
-	# Without this, the next iteration of the loop will think we're setting
-	# the -n (nameref) attribute on endpoint_fields (and warn that -n
-	# cannot be set on an array).
-	unset -n fields
-    done
+        # Without this, the next iteration of the loop will think we're setting
+        # the -n (nameref) attribute on endpoint_fields (and warn that -n
+        # cannot be set on an array).
+        unset -n fields
+done
 
     OUTA=("${checks[@]}")
 }
@@ -2884,40 +2901,40 @@ function CheckStatus {
     local state="$OUT"
 
     case "$state" in
-	OPEN) : ;;
-	null)
-	    OUT="The state of the pull request is not yet known"
-	    return 1
-	    ;;
-	*) Fail "State is not OPEN: '$state'" ;;
+        OPEN) : ;;
+        null)
+            OUT="The state of the pull request is not yet known"
+            return 1
+            ;;
+        *) Fail "State is not OPEN: '$state'" ;;
     esac
 
     JqRaw ".merged" "$json"
     local merged="$OUT"
 
     case "$merged" in
-	false) : ;;
-	null)
-	    OUT="Checking whether pull request has been merged"
-	    return 1
-	    ;;
-	true) Fail "Pull request has been merged" ;;
-	*) Fail "Unknown merged status '$merged'" ;;
+        false) : ;;
+        null)
+            OUT="Checking whether pull request has been merged"
+            return 1
+            ;;
+        true) Fail "Pull request has been merged" ;;
+        *) Fail "Unknown merged status '$merged'" ;;
     esac
 
     JqRaw ".mergeable" "$json"
     local mergeable="$OUT"
 
     case "$mergeable" in
-	MERGEABLE) : ;;
-	CONFLICTING)
-	    Fail "Pull requests is conflicting with origin/master"
-	    ;;
-	null|UNKNOWN)
-	    OUT="Checking for ability to automatically merge"
-	    return 1
-	    ;;
-	*) Fail "Unknown mergeable status '$mergeable'" ;;
+        MERGEABLE) : ;;
+        CONFLICTING)
+            Fail "Pull requests is conflicting with origin/master"
+            ;;
+        null|UNKNOWN)
+            OUT="Checking for ability to automatically merge"
+            return 1
+            ;;
+        *) Fail "Unknown mergeable status '$mergeable'" ;;
     esac
 
     JqRaw ".headRef.name" "$json"
@@ -2927,12 +2944,12 @@ function CheckStatus {
     local current_last_comment_id="$OUT"
     if test "$current_last_comments_id" != null
     then
-	JqRaw ".comments.pageInfo.endCursor" "$json"
-	current_last_comment_id="$OUT"
+        JqRaw ".comments.pageInfo.endCursor" "$json"
+        current_last_comment_id="$OUT"
     fi
     if test "$current_last_comment_id" != "$last_comment_id"
     then
-	Fail "Comments have been added, aborting status check"
+        Fail "Comments have been added, aborting status check"
     fi
 
     Jq ".commits.nodes[].commit" "$json"
@@ -2942,10 +2959,10 @@ function CheckStatus {
     local status="$OUT"
     if test "$status" == "null"
     then
-	local -a checks=()
+        local -a checks=()
     else
-	JqRawLines ".status.contexts[].context" "$json"
-	local -a checks=("${OUTA[@]}")
+        JqRawLines ".status.contexts[].context" "$json"
+        local -a checks=("${OUTA[@]}")
     fi
 
     GetChecksFor "$endpoint" "$owner" "$repo"
@@ -2954,65 +2971,65 @@ function CheckStatus {
     local required_check=""
     for required_check in "${required_checks[@]}"
     do
-	local check_passes=false
+        local check_passes=false
 
-	local check=""
-	for check in "${checks[@]}"
-	do
-	    if [[ "$check" =~ $required_check ]]
-	    then
-		ToJsonString "$check"
-		local check_json="$OUT"
+        local check=""
+        for check in "${checks[@]}"
+        do
+            if [[ "$check" =~ $required_check ]]
+            then
+                ToJsonString "$check"
+                local check_json="$OUT"
 
-		JqRaw ".status.contexts[] | select(.context == $check_json)" \
-		      "$json"
-		local context_json="$OUT"
+                JqRaw ".status.contexts[] | select(.context == $check_json)" \
+                      "$json"
+                local context_json="$OUT"
 
-		JqRaw ".state" "$context_json"
-		local context_state="$OUT"
+                JqRaw ".state" "$context_json"
+                local context_state="$OUT"
 
-		JqRaw ".description" "$context_json"
-		local description="$OUT"
+                JqRaw ".description" "$context_json"
+                local description="$OUT"
 
-		JqRaw ".targetUrl" "$context_json"
-		local target_url="$OUT"
+                JqRaw ".targetUrl" "$context_json"
+                local target_url="$OUT"
 
-		case "$context_state" in
-		    SUCCESS) : ;;
-		    null|PENDING)
-			OUT="Check not finished: $description"$'\n'
-			OUT+="See $target_url for details"
-			return 1
-			;;
-		    *) Fail "Bad check status: '$context_state'"
-		esac
+                case "$context_state" in
+                    SUCCESS) : ;;
+                    null|PENDING)
+                        OUT="Check not finished: $description"$'\n'
+                        OUT+="See $target_url for details"
+                        return 1
+                        ;;
+                    *) Fail "Bad check status: '$context_state'"
+                esac
 
-		check_passes=true
-		break
-	    fi
-	done
+                check_passes=true
+                break
+            fi
+        done
 
-	if ! $check_passes
-	then
-	    OUT="Waiting for check matching '$required_check'"
-	    return 1
-	fi
+        if ! $check_passes
+        then
+            OUT="Waiting for check matching '$required_check'"
+            return 1
+        fi
     done
 
     JqRaw ".status.state" "$json"
     local status_state="$OUT"
 
     case "$status_state" in
-	SUCCESS) : ;;
-	null)
-	    # If there are no required checks, status may be null.
-	    if (( ${#required_checks[@]} > 0 ))
-	    then
-		OUT="Overall status not yet determined"
-		return 1
-	    fi
-	    ;;
-	*) Fail "Bad overall check state: '$status_state'" ;;
+        SUCCESS) : ;;
+        null)
+            # If there are no required checks, status may be null.
+            if (( ${#required_checks[@]} > 0 ))
+            then
+                OUT="Overall status not yet determined"
+                return 1
+            fi
+            ;;
+        *) Fail "Bad overall check state: '$status_state'" ;;
     esac
 
     JqRaw ".oid" "$json"
@@ -3020,7 +3037,7 @@ function CheckStatus {
 
     if test "$head_commit" != "$commit"
     then
-	Fail "Additional commits have been added, refusing to continue"
+        Fail "Additional commits have been added, refusing to continue"
     fi
 }
 
@@ -3036,30 +3053,30 @@ function WaitForChecks {
     local pending_message=""
     local previous_message=""
     while ! CheckStatus "$endpoint" "$owner" "$repo" "$number" "$commit" \
-	    "$last_comment_id"
+            "$last_comment_id"
     do
-	local message="$OUT"
-	if test "$message" == ""
-	then
-	    Fail "Internal error: Check status failed but without message"
-	fi
+        local message="$OUT"
+        if test "$message" == ""
+        then
+            Fail "Internal error: Check status failed but without message"
+        fi
 
-	if test "$message" != "$previous_message"
-	then
-	    printf "%s%s..." "$pending_message" "$message"
-	    pending_message=$'\n'
-	    sleep_seconds=1
-	else
-	    printf "."
+        if test "$message" != "$previous_message"
+        then
+            printf "%s%s..." "$pending_message" "$message"
+            pending_message=$'\n'
+            sleep_seconds=1
+        else
+            printf "."
 
-	    if (( sleep_seconds < 10 ))
-	    then
-		sleep_seconds+=1
-	    fi
-	fi
+            if (( sleep_seconds < 10 ))
+            then
+                sleep_seconds+=1
+            fi
+        fi
 
-	previous_message="$message"
-	sleep "$sleep_seconds"
+        previous_message="$message"
+        sleep "$sleep_seconds"
     done
 
     printf "%s%s\n" "$pending_message" "All checks pass"
@@ -3111,14 +3128,14 @@ function Ptal {
 
     if (( ${#assignees[@]} == 0 ))
     then
-	Fail "There are no assignees to ask for PTAL"
+        Fail "There are no assignees to ask for PTAL"
     fi
 
     local comment="Please take another look"
     local assignee
     for assignee in "${assignees[@]}"
     do
-	comment+=" @$assignee"
+        comment+=" @$assignee"
     done
 
     AddPullRequestComment "$endpoint" "$owner" "$repo" "$number" "$comment"
@@ -3144,14 +3161,14 @@ function MergePullRequest {
 
     if ! [[ "$number" =~ ^[0-9]+$ ]]
     then
-	Fail "Bad PR number: '$pr_number'"
+        Fail "Bad PR number: '$pr_number'"
     elif ! [[ "$commit" =~ ^[0-9a-f]{40}$ ]]
     then
-	Fail "Bad HEAD commit: '$commit'"
+        Fail "Bad HEAD commit: '$commit'"
     fi
 
     PutRest "$endpoint" "/repos/$owner/$repo/pulls/$number/merge" \
-	    -d "{ \"sha\": \"$commit\" }"
+            -d "{ \"sha\": \"$commit\" }"
 }
 
 function LookupReviewers {
@@ -3168,14 +3185,14 @@ function LookupReviewers {
     local reviewer
     for reviewer in "${reviewers_array[@]}"
     do
-	LookupReviewer "$endpoint" "$owner" "$repo" "$reviewer"
+        LookupReviewer "$endpoint" "$owner" "$repo" "$reviewer"
 
-	if test -z "$reviewers"
-	then
-	    reviewers="$OUT"
-	else
-	    reviewers+=,"$OUT"
-	fi
+        if test -z "$reviewers"
+        then
+            reviewers="$OUT"
+        else
+            reviewers+=,"$OUT"
+        fi
     done
 
     OUT="$reviewers"
@@ -3196,14 +3213,14 @@ function WaitForChecksThen {
 
     if test "$assignee" != ""
     then
-	LookupAssignee "$endpoint" "$owner" "$repo" "$assignee"
-	assignee="$OUT"
+        LookupAssignee "$endpoint" "$owner" "$repo" "$assignee"
+        assignee="$OUT"
     fi
 
     if test "$reviewers_string" != ""
     then
-	LookupReviewers "$endpoint" "$owner" "$repo" "$reviewers_string"
-	reviewers_string="$OUT"
+        LookupReviewers "$endpoint" "$owner" "$repo" "$reviewers_string"
+        reviewers_string="$OUT"
     fi
 
     GetPullRequest "$endpoint" "$owner" "$repo" "$number"
@@ -3214,87 +3231,87 @@ function WaitForChecksThen {
     local -a current_reviewers=("${OUTA2[@]}")
 
     WaitForChecks "$endpoint" "$owner" "$repo" "$number" "$commit" \
-		  "$last_comment_id"
+                  "$last_comment_id"
 
     if test "$assignee" != ""
     then
-	AssignPullRequest "$endpoint" "$owner" "$repo" "$number" "$assignee"
-	echo "$assignee assigned to PR"
+        AssignPullRequest "$endpoint" "$owner" "$repo" "$number" "$assignee"
+        echo "$assignee assigned to PR"
     fi
 
     if test "$reviewers_string" != ""
     then
-	AddReviewers "$endpoint" "$owner" "$repo" "$number" "$reviewers_string"
-	echo "$reviewers_string set to review PR"
+        AddReviewers "$endpoint" "$owner" "$repo" "$number" "$reviewers_string"
+        echo "$reviewers_string set to review PR"
     fi
 
     if test "$comment" != ""
     then
-	AddPullRequestComment "$endpoint" "$owner" "$repo" "$number" "$comment"
+        AddPullRequestComment "$endpoint" "$owner" "$repo" "$number" "$comment"
     fi
 
     if $ptal
     then
-	ResolveEndpoint "$endpoint"
-	local user="$OUT2"
+        ResolveEndpoint "$endpoint"
+        local user="$OUT2"
 
-	local -A ptal_logins=()
-	local login
-	for login in "${assignees[@]}" "${current_reviewers[@]}"
-	do
-	    if test "$login" != "$user"
-	    then
-		ptal_logins["$login"]=1
-	    fi
-	done
+        local -A ptal_logins=()
+        local login
+        for login in "${assignees[@]}" "${current_reviewers[@]}"
+        do
+            if test "$login" != "$user"
+            then
+                ptal_logins["$login"]=1
+            fi
+        done
 
-	if (( ${#ptal_logins[@]} == 0 ))
-	then
-	    UsageError wait "There are no reviewers to ask for PTAL from"
-	fi
+        if (( ${#ptal_logins[@]} == 0 ))
+        then
+            UsageError wait "There are no reviewers to ask for PTAL from"
+        fi
 
-	# Printing happens in function
-	Ptal "$endpoint" "$owner" "$repo" "$number" "${!ptal_logins[@]}"
-	echo "Asked for PTAL from: ${!ptal_logins[*]}"
+        # Printing happens in function
+        Ptal "$endpoint" "$owner" "$repo" "$number" "${!ptal_logins[@]}"
+        echo "Asked for PTAL from: ${!ptal_logins[*]}"
     fi
 
     if $approve
     then
-	ApprovePullRequest "$endpoint" "$owner" "$repo" "$number" "$commit"
-	echo "Pull request approved"
+        ApprovePullRequest "$endpoint" "$owner" "$repo" "$number" "$commit"
+        echo "Pull request approved"
     fi
 
     if $merge
     then
-	MergePullRequest "$endpoint" "$owner" "$repo" "$number" "$commit"
-	echo "Pull request merged"
+        MergePullRequest "$endpoint" "$owner" "$repo" "$number" "$commit"
+        echo "Pull request merged"
 
-	git push --quiet --delete origin "$branch"
-	
-	GetBranch
-	local wd_branch="$OUT"
+        git push --quiet --delete origin "$branch"
+        
+        GetBranch
+        local wd_branch="$OUT"
 
-	if test "$wd_branch" == "$branch"
-	then
-	    if ! git checkout --quiet master
-	    then
-		Fail "Failed to check out master"
-	    fi
+        if test "$wd_branch" == "$branch"
+        then
+            if ! git checkout --quiet master
+            then
+                Fail "Failed to check out master"
+            fi
 
-	    if ! git pull --quiet --rebase
-	    then
-		Fail "Failed to pull master"
-	    fi
+            if ! git pull --quiet --rebase
+            then
+                Fail "Failed to pull master"
+            fi
 
-	    echo "master checked out and updated"
+            echo "master checked out and updated"
 
-	    if ! git branch --quiet -d "$wd_branch"
-	    then
-		Fail "Failed to delete local branch '$wd_branch'"
-	    fi
+            if ! git branch --quiet -d "$wd_branch"
+            then
+                Fail "Failed to delete local branch '$wd_branch'"
+            fi
 
-	    echo "Deleted local branch '$wd_branch'"
-	fi
+            echo "Deleted local branch '$wd_branch'"
+        fi
     fi
 
     echo Success
@@ -3329,7 +3346,7 @@ function GetMentionableUsers {
 }"
 
     QueryGraphList "$endpoint" "$query_prefix" "$query_suffix" \
-		   ".data.repository.mentionableUsers"
+                   ".data.repository.mentionableUsers"
     local mentionable_users="$OUT"
 
     # mentionable_users='{"login":"x1","name":"y1 z1"}
@@ -3357,7 +3374,7 @@ function LookupLogin {
 
     if test "$name_or_login" == ""
     then
-	Fail "${description^} cannot be empty"
+        Fail "${description^} cannot be empty"
     fi
 
     GetMentionableUsers "$endpoint" "$owner" "$repo"
@@ -3367,48 +3384,48 @@ function LookupLogin {
     local name_or_login_json="$OUT"
 
     JqRawLines "select(.login == $name_or_login_json) | .login" \
-	       "$users_arrayish"
+               "$users_arrayish"
     local -a matches=("${OUTA[@]}")
 
     case "${#matches[@]}" in
-	0)
-	    Jq "select(.name != null) | select(.name | test($name_or_login_json; \"i\"))" \
-	       "$users_arrayish"
-	    local result="$OUT"
-	    
-	    JqRawLines ".login" "$result"
-	    matches=("${OUTA[@]}")
+        0)
+            Jq "select(.name != null) | select(.name | test($name_or_login_json; \"i\"))" \
+               "$users_arrayish"
+            local result="$OUT"
+            
+            JqRawLines ".login" "$result"
+            matches=("${OUTA[@]}")
 
-	    case "${#matches[@]}" in
-		0) Fail "No $description found with login '$name_or_login' " \
-			"nor name matching '$name_or_login'" ;;
-		1)
-		    local login="${matches[0]}"
+            case "${#matches[@]}" in
+                0) Fail "No $description found with login '$name_or_login' " \
+                        "nor name matching '$name_or_login'" ;;
+                1)
+                    local login="${matches[0]}"
 
-		    JqRaw ".name" "$result"
-		    local name="$OUT"
-		    
-		    read -n1 -p "Found '$name' ($login) matching '$name_or_login', ok? [Y/n] "
-		    if test "$REPLY" != ""
-		    then
-			echo
-			if test "$REPLY" != y
-			then
-			    exit 1
-			fi
-		    fi
-	    	    ;;
-		*) Fail "Found several ${description}s with names matching " \
-			"'$name_or_login': ${matches[*]}" ;;
-	    esac
-	    ;;
-	1) local login="${matches[0]}" ;;
-	*) Fail "Found several ${description}s with login '$name_or_login'!?" ;;
+                    JqRaw ".name" "$result"
+                    local name="$OUT"
+                    
+                    read -n1 -p "Found '$name' ($login) matching '$name_or_login', ok? [Y/n] "
+                    if test "$REPLY" != ""
+                    then
+                        echo
+                        if test "$REPLY" != y
+                        then
+                            exit 1
+                        fi
+                    fi
+                    ;;
+                *) Fail "Found several ${description}s with names matching " \
+                        "'$name_or_login': ${matches[*]}" ;;
+            esac
+            ;;
+        1) local login="${matches[0]}" ;;
+        *) Fail "Found several ${description}s with login '$name_or_login'!?" ;;
     esac
 
     if ! [[ "$login" =~ ^[a-z0-9]+$ ]]
     then
-	Fail "Bad login name '$login' found for $description '$name_or_login'"
+        Fail "Bad login name '$login' found for $description '$name_or_login'"
     fi
 
     OUT="$login"
@@ -3426,7 +3443,7 @@ function gh_reviewers {
 
     if ! GetPullRequestNumber "$endpoint" "$owner" "$repo" "$branch"
     then
-	Fail "There's no PR number associated with working directory"
+        Fail "There's no PR number associated with working directory"
     fi
     local number="$OUT"
 
@@ -3466,15 +3483,15 @@ function AddReviewers {
     local reviewer
     for reviewer in "${reviewers[@]}"
     do
-	ToJsonString "$reviewer"
-	local escaped_reviewer="$OUT"
+        ToJsonString "$reviewer"
+        local escaped_reviewer="$OUT"
 
-	if test -z "$escaped_reviewers_list"
-	then
-	    escaped_reviewers_list="$escaped_reviewer"
-	else
-	    escaped_reviewers_list+=,"$escaped_reviewer"
-	fi
+        if test -z "$escaped_reviewers_list"
+        then
+            escaped_reviewers_list="$escaped_reviewer"
+        else
+            escaped_reviewers_list+=,"$escaped_reviewer"
+        fi
     done
 
     local data="{\"reviewers\": [ $escaped_reviewers_list ]}"
@@ -3486,79 +3503,79 @@ function gh_wait {
     local assignee= approve=false comment= merge=false ptal=false reviewers=
     while (($# > 0))
     do
-	case "$1" in
-	    -A|--approve|+1|--lgtm)
-		approve=true
-		shift
-		;;
-	    -a|--assignee)
-		assignee="$2"
-		shift 2
-		;;
-	    -c|--comment)
-		comment="$2"
-		shift 2
-		;;
-	    -m|--merge)
-		merge=true
-		shift
-		;;
-	    -p|--ptal)
-		ptal=true
-		shift
-		;;
-	    -r|--reviewers)
-		reviewers="$2"
-		shift 2
-		;;
-	    *)
-		break
-		;;
-	esac
+        case "$1" in
+            -A|--approve|+1|--lgtm)
+                approve=true
+                shift
+                ;;
+            -a|--assignee)
+                assignee="$2"
+                shift 2
+                ;;
+            -c|--comment)
+                comment="$2"
+                shift 2
+                ;;
+            -m|--merge)
+                merge=true
+                shift
+                ;;
+            -p|--ptal)
+                ptal=true
+                shift
+                ;;
+            -r|--reviewers)
+                reviewers="$2"
+                shift 2
+                ;;
+            *)
+                break
+                ;;
+        esac
     done
 
     local wrong_usage=true
 
     if (( $# == 0 ))
     then
-	GitHubInfoFromOrigin
-	local endpoint="$OUT"
-	local owner="$OUT2"
-	local repo="$OUT3"
+        GitHubInfoFromOrigin
+        local endpoint="$OUT"
+        local owner="$OUT2"
+        local repo="$OUT3"
 
-	GetBranch
-	local branch="$OUT"
+        GetBranch
+        local branch="$OUT"
 
-	if ! GetPullRequestNumber "$endpoint" "$owner" "$repo" "$branch"
-	then
-	    Fail "There's no pull request associated with working directory"
-	fi
-	local number="$OUT"
-	local url="$OUT2"
+        if ! GetPullRequestNumber "$endpoint" "$owner" "$repo" "$branch"
+        then
+            Fail "There's no pull request associated with working directory"
+        fi
+        local number="$OUT"
+        local url="$OUT2"
 
-	wrong_usage=false
-	echo "Found pull request $url"
+        wrong_usage=false
+        echo "Found pull request $url"
     elif (( $# == 1 ))
     then
-	if PullRequestInfo "$1"
-	then
-	    local endpoint="$OUT"
-	    local owner="$OUT2"
-	    local repo="$OUT3"
-	    local branch="$OUT4"
-	    local number="$OUT5"
-	    wrong_usage=false
-	fi
+        if PullRequestInfo "$1"
+        then
+            local endpoint="$OUT"
+            local owner="$OUT2"
+            local repo="$OUT3"
+            local branch="$OUT4"
+            local number="$OUT5"
+            wrong_usage=false
+        fi
     fi
 
     if $wrong_usage
     then
-	UsageError wait "Please specify which pull request to wait for"
+        UsageError wait "Please specify which pull request to wait for"
     fi
 
     WaitForChecksThen "$endpoint" "$owner" "$repo" "$number" \
-		      "$approve" "$comment" "$assignee" "$merge" "$ptal" \
-		      "$reviewers"
+                      "$approve" "$comment" "$assignee" "$merge" "$ptal" \
+                      "$reviewers"
 }
 
 declare -A UNOFFICIAL_COMMANDS=(
@@ -3608,7 +3625,7 @@ declare -A DANGEROUS_COMMANDS=(
 function Main {
     if (( $# == 0 ))
     then
-	UsageError '' "No command given"
+        UsageError '' "No command given"
     fi
 
     local command="$1"
@@ -3617,15 +3634,15 @@ function Main {
     local func="${COMMANDS[$command]}"
     if test "$func" == ""
     then
-	func="${UNOFFICIAL_COMMANDS[$command]}"
-	if test "$func" == ""
-	then
-	    func="${DANGEROUS_COMMANDS[$command]}"
-	    if test "$func" == ""
-	    then
-		UsageError '' "No such command '$command'"
-	    fi
-	fi
+        func="${UNOFFICIAL_COMMANDS[$command]}"
+        if test "$func" == ""
+        then
+            func="${DANGEROUS_COMMANDS[$command]}"
+            if test "$func" == ""
+            then
+                UsageError '' "No such command '$command'"
+            fi
+        fi
     fi
 
     "$func" "$@"
