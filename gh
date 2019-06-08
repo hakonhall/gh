@@ -4,7 +4,8 @@
 
 set -e
 
-shopt -s nullglob
+shopt -s nullglob lastpipe
+set -o pipefail
 
 declare -r PROGRAM="${0##*/}"
 
@@ -1016,7 +1017,7 @@ EOF
                     ;;
                 j)
                     # down
-                    if (( current_index < num_files ))
+                    if (( current_index + 1 < num_files ))
                     then
                         current_index+=1
                     fi
@@ -1077,10 +1078,11 @@ EOF
                     fi
 
                     # git stash push -- <pathspec>... will stash pathspec PLUS
-                    # ALL FILES IN INDEX.
-                    git reset HEAD
-                    echo git stash push -- "${fs[@]}"
-                    RunOrFail git stash push -- "${fs[@]}"
+                    # ALL FILES IN INDEX. -u is necessary to include untracked
+                    # files, if any as given by fs..
+                    git reset -q HEAD
+                    echo git stash push -u -- "${fs[@]}"
+                    RunOrFail git stash push -u -- "${fs[@]}"
                     Stage
 
                     # Trigger another git status command to refresh file view
@@ -1096,7 +1098,7 @@ EOF
                     else
                         unset selected_files\["$current_file"\]
                     fi
-                    if (( current_index < num_files ))
+                    if (( current_index + 1 < num_files ))
                     then
                         current_index+=1
                     fi
@@ -1890,13 +1892,16 @@ function gh_save {
                 args+=(-m "$2")
                 shift 2 || true
                 ;;
-            *)
+            -*)
                 Fail "Unknown option '$1'"
                 ;;
+            *) break ;;
         esac
     done
 
-    RunOrFail git stash push "${args[@]}" -- "$@"
+    RunOrFail git reset -q HEAD
+    RunOrFail git stash push -u "${args[@]}" -- "$@"
+    Stage
 }
 
 function gh_save2 {
@@ -1927,6 +1932,83 @@ function gh_save2 {
     Stage
     git diff HEAD "$@" > "$diff_file"
     echo "Saved to $diff_file"
+}
+
+function gh_stack {
+    local command="${1:-showall}"
+    shift || true
+
+    case "$command" in
+        di|diff) gh_stack_diff "$@" ;;
+        drop|remove|rm) gh_stack_drop "$@" ;;
+        l|ls|list) gh_stack_list "$@" ;;
+        showall) gh_stack_showall "$@" ;;
+        push) gh_stack_push "$@" ;;
+        pop) gh_stack_pop "$@" ;;
+        s|show) gh_stack_show "$@" ;;
+        *) UsageError stack "Unknown subcommand '$command'" ;;
+    esac
+}
+
+function ParseStackElementId {
+    local command="$1"
+
+    local -a args=()
+
+    if (( $# > 0 ))
+    then
+        if ! [[ "$1" =~ ^[0-9]+$ ]]
+        then
+            UsageError "$command" "diff takes the stack entry id number as " \
+                       "an argument (top-most is 0), but found '$1'"
+        elif (( $# > 1 ))
+        then
+            UsageError "$command" "Too many arguments"
+        fi
+        args+=("stash@{$1}")
+    fi
+
+    OUTA=("${args[@]}")
+}
+
+function gh_stack_diff {
+    ParseStackElementId "$@"
+    RunOrFail git stash show -u "${OUTA[@]}"
+}
+
+function gh_stack_drop {
+    ParseStackElementId "$@"
+    RunOrFail git stash drop "${OUTA[@]}"
+}
+
+function gh_stack_list {
+    RunOrFail git stash list
+}
+
+function gh_stack_showall {
+    local -i num
+    git stash list | while read -r; do num+=1; done
+
+    local -i i=0
+    for ((i=0; i<num; ++i))
+    do
+        echo "$i: # Stack element ID"
+        git stash show "$i"
+    done
+}
+
+function gh_stack_pop {
+    ParseStackElementId "$@"
+    gh_load "${OUTA[@]}"
+}
+
+function gh_stack_push {
+    gh_save "$@"
+}
+
+function gh_stack_show {
+    ParseStackElementId "$@"
+    RunOrFail git stash show "${OUTA[@]}"
 }
 
 function gh_status {
@@ -2625,7 +2707,7 @@ function TryGetPullRequest {
 
     JqRaw ".headRef.name" "$json"
     local branch="$OUT"
-    if ! [[ "$branch" =~ ^[a-zA-Z0-9_/-]+$ ]]
+    if ! [[ "$branch" =~ ^[a-zA-Z0-9_/.-]+$ ]]
     then
         Fail "Unexpected name of branch: '$branch'"
     elif test "$branch" == master
@@ -3602,9 +3684,10 @@ declare -A UNOFFICIAL_COMMANDS=(
     [resolve-pr]=gh_resolve_pr
     [resolve-wd]=gh_resolve_wd
     [revert]=gh_revert
-    [s]=gh_status
+    [s]=gh_stack
     [save]=gh_save
     [save2]=gh_save2
+    [stack]=gh_stack
     [stage]=Stage
     [status]=gh_status
     [undo]=gh_undo
