@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-#
-# TODO: Require jq, but only when actually needed by any command.
 
 set -e
 
@@ -38,6 +36,8 @@ declare -A INH=()
 declare OUT="" OUT2="" OUT3="" OUT4="" OUT5="" OUT6=""
 declare -a OUTA=() OUTA2=()
 declare -A OUTH=() OUTH2=()
+
+declare JQ_VERIFIED=false
 
 function Usage {
     local arg
@@ -358,6 +358,15 @@ function Jq {
     local json="$2"
     shift 2
 
+    if ! $JQ_VERIFIED
+    then
+        if ! type -a jq &> /dev/null
+        then
+            Fail "'jq' is not installed"
+        fi
+        JQ_VERIFIED=true
+    fi
+
     local out
     if ! out=$(jq "$@" "$jq_expression" <<< "$json" 2>&1)
     then
@@ -550,7 +559,7 @@ function Curl {
         Fail "Failed to read '$response_file'"
     fi
 
-    if ! jq . <<< "$response" &> /dev/null
+    if ! Jq . "$response" &> /dev/null
     then
         Fail "Response is invalid JSON: '$response'"
     fi
