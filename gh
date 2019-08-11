@@ -37,6 +37,7 @@ declare OUT="" OUT2="" OUT3="" OUT4="" OUT5="" OUT6=""
 declare -a OUTA=() OUTA2=()
 declare -A OUTH=() OUTH2=()
 
+declare CURL_VERIFIED=false
 declare JQ_VERIFIED=false
 
 function Usage {
@@ -483,6 +484,15 @@ function Curl {
     local token="$2"
     shift 2
     local -a args=("$@")
+
+    if ! $CURL_VERIFIED
+    then
+        if ! type -a curl &> /dev/null
+        then
+            Fail "'curl' is not installed"
+        fi
+        CURL_VERIFIED=true
+    fi
 
     local save_dir="$HOME/tmp/gh.cache"
     mkdir -p "$save_dir"
