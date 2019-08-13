@@ -72,6 +72,8 @@ COMMANDS
   save [-m MESSAGE] [PATH...]
       Save a diff to ~/.gh.diff. With NAME, save to ~/.gh.diff.NAME, or if NAME
       is a path save to that path. With PATH, only save a diff of those paths.
+  stack
+      Stack commands similar to 'git stash', see 'gh help stash' for more info.
   undo
       Undo last commit command, i.e. set HEAD to parent without touching wd.
   wait [OPTION...] [PR_URL]
@@ -1950,6 +1952,29 @@ function gh_stack {
     esac
 }
 
+function gh_help_stack {
+    cat <<EOF
+Usage: gh stack [SUBCOMMAND [ARG...]]
+Operate on a stack of pending commits
+
+The default subcommand is showall.
+
+SUBCOMMAND:
+  diff [ID]
+      Diff stack number ID, 0-offset
+  drop [ID]
+      Drop stack number ID, 0-offset
+  showall
+      Show all stack elements
+  pop [ID]
+      Apply and drop stack element ID, 0-offset
+  push [FILE...]
+      Push a commit on the stack containing the given files, or all modifications
+  show [ID]
+      Show summary stats on stack element ID, 0-offset
+EOF
+}
+
 function ParseStackElementId {
     local command="$1"
 
@@ -1993,6 +2018,9 @@ function gh_stack_showall {
     for ((i=0; i<num; ++i))
     do
         echo "$i: # Stack element ID"
+        # Apparently, untracked files are stored in stash@{0}^3,
+        # but without untracked files there is no such commit.
+        echo "Warning: untracked files are not shown"
         git stash show "$i"
     done
 }
@@ -2196,12 +2224,25 @@ function CreatePullRequest {
 }
 
 function gh_help_checkin {
-    # Covered by Usage
-    Usage
+    cat <<EOF
+Usage: gh checkin [OPTION...] [MESSAGE]
+Commit with MESSAGE and a branch derived from MESSAGE, and push to remote.
+
+Options:
+  --                       Any next argument is interpreted as MESSAGE.
+  --assignee,-a ASSIGNEE   Assign pull request to ASSIGNEE.
+  --comment,-c COMMENT     Set pull request comment.
+  --edit,-e                Edit the commit message (MESSAGE) before committing.
+  --merge,-m               Merge once all pull request checks pass.
+  --ptal,-p                Add a PTAL message to the pull request.
+  --reviewers,-r REVS      Set the pull request reviewers to REVS, once the
+                           pull request checks pass.
+EOF
+    exit 0
 }
 
 function gh_checkin {
-    local approve=false assignee="" comment="" merge=false ptal=false title=""
+    local assignee="" comment="" merge=false ptal=false title=""
     local escaped_edit_option= reviewers=""
     while (( $# > 0 ))
     do
@@ -2209,10 +2250,6 @@ function gh_checkin {
             --)
                 shift
                 break
-                ;;
-            -A|--approve|+1)
-                approve=true
-                shift
                 ;;
             -a|--assignee)
                 assignee="$2"
@@ -2339,6 +2376,8 @@ function gh_checkin {
         local url="$OUT2"
         echo "Created pull request $url"
     fi
+
+    local approve=false
 
     WaitForChecksThen "$endpoint" "$owner" "$repo" "$number" \
                       "$approve" "$comment" "$assignee" "$merge" "$ptal" \
