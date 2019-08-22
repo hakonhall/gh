@@ -1628,12 +1628,6 @@ function gh_info {
 }
 
 function gh_load {
-    # <"$@"> could expand to <2>, which would mean stash id 2 would be popped.
-    # Default is <0>.
-    RunOrFail git stash pop "$@"
-}
-
-function gh_load2 {
     local diff_file="$DIFF_FILE"
 
     if (( $# > 0 ))
@@ -1903,32 +1897,6 @@ function gh_revert {
 }
 
 function gh_save {
-    local -a args=()
-
-    while (( $# > 0 ))
-    do
-        case "$1" in
-            -H|--hunk)
-                args+=(-p)
-                shift
-                ;;
-            -m|--message)
-                args+=(-m "$2")
-                shift 2 || true
-                ;;
-            -*)
-                Fail "Unknown option '$1'"
-                ;;
-            *) break ;;
-        esac
-    done
-
-    RunOrFail git reset -q HEAD
-    RunOrFail git stash push -u "${args[@]}" -- "$@"
-    Stage
-}
-
-function gh_save2 {
     local diff_file="$DIFF_FILE"
 
     while (( $# > 0 ))
@@ -2049,11 +2017,35 @@ function gh_stack_showall {
 
 function gh_stack_pop {
     ParseStackElementId "$@"
-    gh_load "${OUTA[@]}"
+    # <"${OUTA[@]"> could expand to <2>, which would mean stash id 2 would be
+    # popped.  Default is <0>.
+    RunOrFail git stash pop "${OUTA[@]}"
 }
 
 function gh_stack_push {
-    gh_save "$@"
+    local -a args=()
+
+    while (( $# > 0 ))
+    do
+        case "$1" in
+            -H|--hunk)
+                args+=(-p)
+                shift
+                ;;
+            -m|--message)
+                args+=(-m "$2")
+                shift 2 || true
+                ;;
+            -*)
+                Fail "Unknown option '$1'"
+                ;;
+            *) break ;;
+        esac
+    done
+
+    RunOrFail git reset -q HEAD
+    RunOrFail git stash push -u "${args[@]}" -- "$@"
+    Stage
 }
 
 function gh_stack_show {
@@ -3759,7 +3751,6 @@ declare -A UNOFFICIAL_COMMANDS=(
     [info]=gh_info
     [is-clean]=IsClean
     [load]=gh_load
-    [load2]=gh_load2
     [m]=gh_menu
     [menu]=gh_menu
     [pending]=gh_pending
@@ -3769,7 +3760,6 @@ declare -A UNOFFICIAL_COMMANDS=(
     [revert]=gh_revert
     [s]=gh_stack
     [save]=gh_save
-    [save2]=gh_save2
     [stack]=gh_stack
     [stage]=Stage
     [status]=gh_status
