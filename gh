@@ -22,6 +22,7 @@ declare -A COMMANDS=(
     [ci]=gh_checkin
     [clone]=gh_clone
     [commands]=gh_commands
+    [edit]=gh_edit
     [h]=gh_help
     [help]=gh_help
     [refresh]=gh_refresh
@@ -63,6 +64,8 @@ COMMANDS
   diff [-m] [OPT...]
       Diff HEAD with working directory, passing OPT to git diff. -m will diff
       against merge base (last common ancestor to origin/master and HEAD).
+  edit
+      Open all modified and added files in an editor (EDITOR must be set).
   help [config]
   load [P]
       Apply diff from ~/.gh.diff. If P is specified and refers to a file,
@@ -3602,6 +3605,28 @@ function GetReviewers {
     local path=/repos/"$owner"/"$repo"/pulls/"$pr_number"/requested_reviewers
     GetRest "$endpoint" "$path"
     local json="$OUT"
+}
+
+function gh_edit {
+    local editor="${VISUAL:-${EDITOR}}"
+    test "$editor" != "" || UsageError "EDITOR is not set"
+
+    GetStatus
+    local -a files=("${OUTA[@]}")
+    local -A file_statuses=()
+    CopyHashTo OUTH file_statuses
+
+    local -A modified=()
+    local file
+    for file in "${files[@]}"
+    do
+        local status="${file_statuses[$file]:0:1}"
+        case "$status" in
+            A|M) modified["$file"]=1 ;;
+        esac
+    done
+
+    Run exec "$EDITOR" "${!modified[@]}"
 }
 
 function gh_exec {
