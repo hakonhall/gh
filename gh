@@ -1624,7 +1624,8 @@ function gh_info {
     fi
 
     gh_branch --full
-    gh_status
+    Stage
+    git diff --stat HEAD
 }
 
 function gh_load {
@@ -3762,6 +3763,7 @@ declare -A UNOFFICIAL_COMMANDS=(
     [save]=gh_save
     [stack]=gh_stack
     [stage]=Stage
+    [stat]=gh_status
     [status]=gh_status
     [undo]=gh_undo
     [up]=gh_update
