@@ -77,8 +77,8 @@ COMMANDS
       Save a diff to ~/.gh.diff. With NAME, save to ~/.gh.diff.NAME, or if NAME
       is a path save to that path. With PATH, only save a diff of those paths.
   stack
-      Stack commands similar to 'git stash', see 'gh help stash' for more info.
-  undo
+      Stack commands similar to 'git stash', see 'gh help stack' for more info.
+  uncommit
       Undo last commit command, i.e. set HEAD to parent without touching wd.
   wait [OPTION...] [PR_URL]
       Wait for checks to pass.
@@ -1620,12 +1620,12 @@ function GetBranch {
 function gh_info {
     if (( $# != 0 ))
     then
-        UsageError undo "Command takes exactly zero arguments"
+        UsageError info "Command takes exactly zero arguments"
     fi
 
     gh_branch --full
     Stage
-    git diff --stat HEAD
+    GIT_PAGER="less -F -X" git diff --stat HEAD
 }
 
 function gh_load {
@@ -1695,13 +1695,16 @@ function PendingUpstreamCommits {
 }
 
 function gh_pending {
-    if (( $# != 0 ))
-    then
-        UsageError undo "Command takes exactly zero arguments"
-    fi
+    local branch
 
-    GetBranch
-    local branch="$OUT"
+    case "$#" in
+        0)
+            GetBranch
+            branch="$OUT"
+            ;;
+        1) branch="$1" ;;
+        *) UsageError pending "Too many arguments" ;;
+    esac
 
     PendingUpstreamCommits "$branch"
     local upstream="$OUT"
@@ -2090,15 +2093,15 @@ function Stage {
     then
         # TODO: Shouldn't this be (.) ?
         root_args=()
-            elif [[ "$root" =~ ^- ]]
-        then
-            root_args=(-- "$root")
-            else
-                root_args=("$root")
-        fi
+    elif [[ "$root" =~ ^- ]]
+    then
+        root_args=(-- "$root")
+    else
+        root_args=("$root")
+    fi
 
-            Run git reset --quiet "${root_args[@]}"
-            Run git add --all "${root_args[@]}"
+    Run git reset --quiet "${root_args[@]}"
+    Run git add --all "${root_args[@]}"
 }
 
 function IsClean {
@@ -2399,10 +2402,10 @@ function gh_checkin {
                       "$reviewers"
 }
 
-function gh_undo {
+function gh_uncommit {
     if (( $# > 0 ))
     then
-        UsageError undo "Command takes exactly zero arguments"
+        UsageError uncommit "Command takes exactly zero arguments"
     fi
 
     git reset --soft HEAD^
@@ -2414,7 +2417,7 @@ function gh_undo {
     # Alternatively, if B is checked out locally:
     #   git reset HEAD^ --hard
     #   git push origin -f
-    # The first command would also be 'gh undo; gh revert'
+    # The first command would also be 'gh uncommit; gh revert'
 }
 
 function gh_clean_branch {
@@ -3157,7 +3160,7 @@ function CheckStatus {
 
     case "$status_state" in
         SUCCESS) : ;;
-        null)
+        null|PENDING)
             # If there are no required checks, status may be null.
             if (( ${#required_checks[@]} > 0 ))
             then
@@ -3765,7 +3768,7 @@ declare -A UNOFFICIAL_COMMANDS=(
     [stage]=Stage
     [stat]=gh_status
     [status]=gh_status
-    [undo]=gh_undo
+    [uncommit]=gh_uncommit
     [up]=gh_update
     [update]=gh_update)
 
