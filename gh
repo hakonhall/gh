@@ -3482,8 +3482,7 @@ function WaitForChecksThen {
             echo "master checked out and updated"
 
             # The following git command may output the following warning, if
-            # the repo has been set up to automatically delete branches after
-            # merge:
+            # the repo has been set up to a merge method other than 'merge':
             #
             # warning: deleting branch 'hakonhall/add-gitignore' that has been merged to
             #          'refs/remotes/origin/hakonhall/add-gitignore', but not yet merged to HEAD.
