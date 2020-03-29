@@ -3291,6 +3291,26 @@ function ApprovePullRequest {
     PostRest "$endpoint" "/repos/$owner/$repo/pulls/$number/reviews" -d "$data"
 }
 
+function GetMergeMethod {
+    local endpoint="$1"
+    local owner="$2"
+    local repo="$3"
+
+    ReadConfigAsString
+    local json="$OUT"
+
+    JqRaw ".endpoints.$endpoint.owners.$owner.repos.$repo.merge_method" "$json"
+    local merge_method="$OUT"
+
+    if test "$merge_method" == null
+    then
+        # Default merge method
+        merge_method=merge
+    fi
+
+    OUT="$merge_method"
+}
+
 function MergePullRequest {
     local endpoint="$1"
     local owner="$2"
@@ -3306,8 +3326,12 @@ function MergePullRequest {
         Fail "Bad HEAD commit: '$commit'"
     fi
 
+    GetMergeMethod "$endpoint" "$owner" "$repo"
+    ToJsonString "$OUT"
+    local merge_method="$OUT"
+
     PutRest "$endpoint" "/repos/$owner/$repo/pulls/$number/merge" \
-            -d "{ \"sha\": \"$commit\" }"
+            -d "{ \"sha\": \"$commit\", \"merge_method\": $merge_method }"
 }
 
 function LookupReviewers {
@@ -3425,8 +3449,21 @@ function WaitForChecksThen {
         MergePullRequest "$endpoint" "$owner" "$repo" "$number" "$commit"
         echo "Pull request merged"
 
-        git push --quiet --delete origin "$branch"
-        
+        # Auto-delete branch may have been enabled, in case this will fail with
+        # message:
+
+        #   error: unable to delete 'hakonhall/add-gitignore': remote ref does not exist
+        #   error: failed to push some refs to 'git@github.com:hakonhall/gh.git'"
+        local output
+        if output=$(git push --quiet --delete origin "$branch" 2>&1)
+        then
+            test "$output" == "" || printf "%s\n" "$output"
+        elif ! [[ "$output" == *'remote ref does not exist'* ]]
+        then
+            printf "%s\n" "$output" >&2
+            return 1
+        fi
+
         GetBranch
         local wd_branch="$OUT"
 
@@ -3444,6 +3481,12 @@ function WaitForChecksThen {
 
             echo "master checked out and updated"
 
+            # The following git command may output the following warning, if
+            # the repo has been set up to automatically delete branches after
+            # merge:
+            #
+            # warning: deleting branch 'hakonhall/add-gitignore' that has been merged to
+            #          'refs/remotes/origin/hakonhall/add-gitignore', but not yet merged to HEAD.
             if ! git branch --quiet -d "$wd_branch"
             then
                 Fail "Failed to delete local branch '$wd_branch'"
