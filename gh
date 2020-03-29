@@ -2658,25 +2658,46 @@ function gh_update {
 
 function gh_diff {
     Stage
-    
-    if (( $# == 0 )) && test -v DISPLAY && type diffuse &> /dev/null && test -t 1
+
+    if [[ -t 1 && ( -v DISPLAY || $MACHTYPE =~ -apple-darwin ) ]] &&
+           diffuse -h 2> /dev/null | grep -q -- --modified-since
     then
-       # Only run diffuse if we're running X, diffuse is installed, and stdout
-       # is a terminal (otherwise stdout could be 'less' or a file).
-       # Make it easy to modify while looking at diff
-       diffuse -m &
-    else
-        local branches=()
-        if test "$1" == -m || test "$1" == --merge-base
-        then
+        local modified_since=HEAD
+
+        while (( $# > 0 ))
+        do
+            case "$1" in
+                -m|--merge-base)
+                    modified_since=$(git merge-base origin/master HEAD)
+                    ;;
+                -c|--commit)
+                    modified_since="$2"
+                    shift
+                    ;;
+                -*) Fail "Unknown option '$1'" ;;
+                *) Fail "Unknown subcommand '$1'" ;;
+            esac
             shift
-            local merge_base=$(git merge-base origin/master HEAD)
-            branches+=("$merge_base")
-        else
-            branches+=(HEAD)
-        fi
-        git diff "$@" "${branches[@]}"
-fi
+        done
+
+        MaybeEchoCommand diffuse -M "$modified_since"
+        # diffuse outputs warning:
+        #   *** WARNING: Method userSpaceScaleFactor in class NSView...
+        # Which is not even invoked by diffuse.
+        exec diffuse -M "$modified_since" 2> /dev/null &
+        return 0
+    fi
+
+    local branches=()
+    if test "$1" == -m || test "$1" == --merge-base
+    then
+        shift
+        local merge_base=$(git merge-base origin/master HEAD)
+        branches+=("$merge_base")
+    else
+        branches+=(HEAD)
+    fi
+    git diff "$@" "${branches[@]}"
 }
 
 function gh_head {
