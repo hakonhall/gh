@@ -2680,11 +2680,18 @@ function gh_diff {
             shift
         done
 
-        MaybeEchoCommand diffuse -M "$modified_since"
-        # diffuse outputs warning:
-        #   *** WARNING: Method userSpaceScaleFactor in class NSView...
-        # Which is not even invoked by diffuse.
-        exec diffuse -M "$modified_since" 2> /dev/null &
+        if git diff --quiet --cached "$modified_since"
+        then
+            echo "There are no changes since $modified_since"
+        else
+            MaybeEchoCommand diffuse -M "$modified_since"
+            # diffuse outputs warning:
+            #   *** WARNING: Method userSpaceScaleFactor in class NSView...
+            # Which is not even invoked by diffuse.
+            exec diffuse -M "$modified_since" 2> /dev/null &
+            echo "diffuse spawned in the background"
+        fi
+
         return 0
     fi
 
@@ -3320,7 +3327,14 @@ function GetMergeMethod {
     ReadConfigAsString
     local json="$OUT"
 
-    JqRaw ".endpoints.$endpoint.owners.$owner.repos.$repo.merge_method" "$json"
+    ToJsonString "$endpoint"
+    local eJson="$OUT"
+    ToJsonString "$owner"
+    local oJson="$OUT"
+    ToJsonString "$repo"
+    local rJson="$OUT"
+
+    JqRaw ".endpoints.$eJson.owners.$oJson.repos.$rJson.merge_method" "$json"
     local merge_method="$OUT"
 
     if test "$merge_method" == null
