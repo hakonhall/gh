@@ -128,7 +128,7 @@ function Format {
     local assignment
     for assignment in "$@"
     do
-        if ! [[ "$assignment" =~ ^(.)=(.*)$ ]]
+        if ! [[ "$assignment" =~ ^([^=])=(.*)$ ]]
         then
             Fail "Bad specifier assignment '$assignment'"
         fi
@@ -158,12 +158,8 @@ function Format {
                         state=normal
                         ;;
                     *)
-                        local substitute="${specifiers[$char]}"
-                        if test -z "$substitute"
-                        then
-                            Fail "Bad conversion specifier '$char'"
-                        fi
-                        text+="$substitute"
+                        # Some substitutions may be empty
+                        text+="${specifiers[$char]}"
                         state=normal
                         ;;
                 esac
@@ -1735,6 +1731,8 @@ function PullRequestInfo {
         if TryGetPullRequest "$endpoint" "$owner" "$repo" "$number"
         then
             local branch="$OUT"
+            local -a assignees=("${OUTA[@]}")
+            local -a reviewers=("${OUTA2[@]}")
             wrong_usage=false
         fi
     elif FindEndpointIfPullRequestUrl "$pr_id"
@@ -1744,6 +1742,8 @@ function PullRequestInfo {
         local repo="$OUT3"
         local number="$OUT4"
         local branch="$OUT5"
+        local -a assignees=("${OUTA[@]}")
+        local -a reviewers=("${OUTA2[@]}")
         wrong_usage=false
     fi
 
@@ -1756,12 +1756,14 @@ function PullRequestInfo {
         OUT3="$repo"
         OUT4="$branch"
         OUT5="$number"
+        OUTA=("${assignees[@]}")
+        OUTA2=("${reviewers[@]}")
         return 0
     fi
 }
 
 function gh_resolve_pr {
-    local format=$'endpoint: %e\nowner: %o\nrepo: %r\nnumber: %n\n'
+    local format=$'endpoint: %e\nowner: %o\nrepo: %r\nnumber: %n\nassignees: %a\nreviewers: %R\n'
     while (( $# > 0 ))
     do
         case "$1" in
@@ -1784,7 +1786,8 @@ function gh_resolve_pr {
 
     if PullRequestInfo "$pull_request_url_or_number"
     then
-        Format "$format" e="$OUT" o="$OUT2" r="$OUT3" b="$OUT4" n="$OUT5"
+        Format "$format" e="$OUT" o="$OUT2" r="$OUT3" b="$OUT4" n="$OUT5" \
+               a="${OUTA[*]}" R="${OUTA2[*]}"
         printf "%s" "$OUT"
     else
         Fail "Failed to find pull request identified by " \
@@ -2744,9 +2747,22 @@ function TryGetPullRequest {
           login
         }
       }
-      suggestedReviewers {
-        reviewer {
-          login
+      reviewRequests(first:100) {
+        nodes {
+          requestedReviewer {
+            ...on User {
+              login
+            }
+          }
+        }
+      }
+      reviews(first:100) {
+        nodes {
+          author {
+            ...on User {
+              login
+            }
+          }
         }
       }
       comments(last:1) {
@@ -2825,16 +2841,12 @@ function TryGetPullRequest {
     JqRawLines ".assignees.nodes[].login" "$json"
     local -a assignees=("${OUTA[@]}")
 
-    # This didn't list the reviewers on one occasion, something the explorer
-    # confirmed. Perhaps REST API would have worked? Reviewer showed on the web
-    # page.
-    if $github_reviewer_moved
-    then
-        JqRawLines ".suggestedReviewers[].reviewer.login" "$json"
-    else
-        JqRawLines ".reviewRequests.nodes[].reviewer.login" "$json"
-    fi
+    # A reviewer that has added a comment is in reviews, otherwise in
+    # reviewRequests.
+    JqRawLines ".reviewRequests.nodes[].requestedReviewer.login" "$json"
     local -a reviewers=("${OUTA[@]}")
+    JqRawLines ".reviews.nodes[].author.login" "$json"
+    reviewers+=("${OUTA[@]}")
 
     OUT="$branch"
     OUT2="$head_commit"
@@ -2897,6 +2909,8 @@ function FindEndpointIfPullRequestUrl {
         then
             local branch="$OUT"
             local canonical_url="$OUT3"
+            local -a assignees=("${OUTA[@]}")
+            local -a reviewers=("${OUTA2[@]}")
 
             if test "$sub_url" != "$canonical_url"
             then
@@ -2909,6 +2923,8 @@ function FindEndpointIfPullRequestUrl {
             OUT3="$repo"
             OUT4="$number"
             OUT5="$branch"
+            OUTA=("${assignees[@]}")
+            OUTA2=("${reviewers[@]}")
             return 0
         fi
     done
