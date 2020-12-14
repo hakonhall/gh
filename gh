@@ -3456,7 +3456,6 @@ function WaitForChecksThen {
     if test "$reviewers_string" != ""
     then
         AddReviewers "$endpoint" "$owner" "$repo" "$number" "$reviewers_string"
-        echo "$reviewers_string set to review PR"
     fi
 
     if test "$comment" != ""
@@ -3681,7 +3680,9 @@ function gh_reviewers {
 
     GetReviewers "$endpoint" "$owner" "$repo" "$number"
 
-    printf "%s\n" "$OUT"
+    if (( ${#OUTA[@]} > 0 )); then
+        printf "%s\n" "${OUTA[@]}"
+    fi
 }
 
 function GetReviewers {
@@ -3694,6 +3695,8 @@ function GetReviewers {
     local path=/repos/"$owner"/"$repo"/pulls/"$pr_number"/requested_reviewers
     GetRest "$endpoint" "$path"
     local json="$OUT"
+
+    JqRawLines ".users[].login" "$json"
 }
 
 function gh_edit {
@@ -3729,8 +3732,27 @@ function AddReviewers {
     local pr_number="$4"
     local comma_separated_list_of_reviewers="$5"
     
+    GetReviewers "$endpoint" "$owner" "$repo" "$pr_number"
+    local -A existing_reviewers=()
+    local r
+    for r in "${OUTA[@]}"; do
+        echo "$r is already a reviewer"
+        existing_reviewers["$r"]=1
+    done
+
+    local -a reviewers=()
     SplitBy "$comma_separated_list_of_reviewers" ,
-    local -a reviewers=("${OUTA[@]}")
+    for r in "${OUTA[@]}"; do
+        if test "${existing_reviewers[$r]}" == 1; then
+            echo "$r already a reviewer"
+        else
+            reviewers+=("$r")
+        fi
+    done
+
+    if (( ${#reviewers[@]} == 0 )); then
+        return
+    fi
 
     local escaped_reviewers_list=""
 
@@ -3751,6 +3773,8 @@ function AddReviewers {
     local data="{\"reviewers\": [ $escaped_reviewers_list ]}"
     local path=/repos/"$owner"/"$repo"/pulls/"$pr_number"/requested_reviewers
     PostRest "$endpoint" "$path" -d "$data"
+
+    echo "${reviewers[*]} set to review PR"
 }
 
 function gh_wait {
@@ -3841,6 +3865,7 @@ declare -A UNOFFICIAL_COMMANDS=(
     [co]=gh_checkout
     [di]=gh_diff
     [diff]=gh_diff
+    [drop]=gh_stack_drop
     [head]=gh_head
     [hi]=gh_history
     [history]=gh_history
@@ -3848,15 +3873,20 @@ declare -A UNOFFICIAL_COMMANDS=(
     [info]=gh_info
     [is-clean]=IsClean
     [load]=gh_load
+    [ls]=gh_stack_list
     [m]=gh_menu
     [menu]=gh_menu
     [pending]=gh_pending
+    [pop]=gh_stack_pop
+    [push]=gh_stack_push
     [repo]=gh_repo
     [resolve-pr]=gh_resolve_pr
     [resolve-wd]=gh_resolve_wd
     [revert]=gh_revert
     [s]=gh_stack
     [save]=gh_save
+    [sdi]=gh_stack_diff
+    [sdiff]=gh_stack_diff
     [stack]=gh_stack
     [stage]=Stage
     [stat]=gh_status
