@@ -1762,6 +1762,26 @@ function PullRequestInfo {
     fi
 }
 
+function gh_pr {
+    GitHubInfoFromOrigin
+    local endpoint="$OUT"
+    local owner="$OUT2"
+    local repo="$OUT3"
+    local ssh_url="$OUT4"
+
+    GetBranch
+    local branch="$OUT"
+
+    if ! GetPullRequestNumber "$endpoint" "$owner" "$repo" "$branch"
+    then
+        UsageError pr "There's no PR number associated with working directory"
+    fi
+    local number="$OUT"
+    local url="$OUT2"
+
+    printf "%s\n" "$url"
+}
+
 function gh_resolve_pr {
     local format=$'endpoint: %e\nowner: %o\nrepo: %r\nnumber: %n\nassignees: %a\nreviewers: %R\n'
     while (( $# > 0 ))
@@ -2026,7 +2046,15 @@ function gh_stack_pop {
     ParseStackElementId "$@"
     # <"${OUTA[@]"> could expand to <2>, which would mean stash id 2 would be
     # popped.  Default is <0>.
-    RunOrFail git stash pop "${OUTA[@]}"
+    
+    if ! OUT=$(git stash pop "${OUTA[@]}" 2>&1) && test "$OUT" != "No stash entries found."
+    then
+        echo "$OUT" >&2
+        false
+    elif test -n "$OUT"
+    then
+        echo "$OUT"
+    fi
 }
 
 function gh_stack_push {
@@ -2252,7 +2280,7 @@ Commit with MESSAGE and a branch derived from MESSAGE, and push to remote.
 Options:
   --                       Any next argument is interpreted as MESSAGE.
   --assignee,-a ASSIGNEE   Assign pull request to ASSIGNEE.
-  --comment,-c COMMENT     Set pull request comment.
+  --comment,-c COMMENT     Use MESSAGE for branch name, and COMMENT for commit.
   --edit,-e                Edit the commit message (MESSAGE) before committing.
   --merge,-m               Merge once all pull request checks pass.
   --ptal,-p                Add a PTAL message to the pull request.
@@ -2263,8 +2291,9 @@ EOF
 }
 
 function gh_checkin {
-    local assignee="" comment="" merge=false ptal=false title=""
-    local escaped_edit_option= reviewers=""
+    local assignee="" merge=false ptal=false title=""
+    local escaped_edit_option= reviewers="" wait=true
+    local -a comment=()
     while (( $# > 0 ))
     do
         case "$1" in
@@ -2296,6 +2325,10 @@ function gh_checkin {
             -r|--reviewers)
                 reviewers="$2"
                 shift 2
+                ;;
+            -w|--no-wait)
+                wait=false
+                shift
                 ;;
             -*) UsageError checkin "Unknown option '$1'" ;;
             *) break ;;
@@ -2350,8 +2383,22 @@ function gh_checkin {
             Fail "Failed to find a good branch name from the title '$title'"
         fi
 
+        if test "$comment" == ""
+        then
+            local message="$title"
+        else
+            local message="$comment"
+        fi
+
         ResolveEndpoint "$endpoint"
         local user="$OUT2"
+
+        if test "$owner" == vespa -a "$repo" == vespa-yahoo
+        then
+            # HACK: Special code invoked when branch are identical, so force
+            # one user.  Don't merge this gh version...
+            user=hakonhall
+        fi
 
         branch="$user/$branch"
 
@@ -2366,7 +2413,7 @@ function gh_checkin {
         git stash pop --quiet
 
         Stage
-        git commit --quiet $escaped_edit_option -m "$title"
+        git commit --quiet $escaped_edit_option -m "$message"
     elif ! IsClean
     then
         local -a args=()
@@ -2398,11 +2445,14 @@ function gh_checkin {
         echo "Created pull request $url"
     fi
 
-    local approve=false
+    if $wait
+    then
+        local approve=false
 
-    WaitForChecksThen "$endpoint" "$owner" "$repo" "$number" \
-                      "$approve" "$comment" "$assignee" "$merge" "$ptal" \
-                      "$reviewers"
+        WaitForChecksThen "$endpoint" "$owner" "$repo" "$number" \
+                          "$approve" "" "$assignee" "$merge" "$ptal" \
+                          "$reviewers"
+    fi
 }
 
 function gh_uncommit {
@@ -2663,7 +2713,8 @@ function gh_diff {
     Stage
 
     if [[ -t 1 && ( -v DISPLAY || $MACHTYPE =~ -apple-darwin ) ]] &&
-           diffuse -h 2> /dev/null | grep -q -- --modified-since
+           diffuse -h 2> /dev/null | grep -q -- --modified-since &&
+           false # diffuse fails to import gtk on my machine, but -h still works
     then
         local modified_since=HEAD
 
@@ -3878,6 +3929,7 @@ declare -A UNOFFICIAL_COMMANDS=(
     [menu]=gh_menu
     [pending]=gh_pending
     [pop]=gh_stack_pop
+    [pr]=gh_pr
     [push]=gh_stack_push
     [repo]=gh_repo
     [resolve-pr]=gh_resolve_pr
