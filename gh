@@ -2713,7 +2713,8 @@ function gh_diff {
     Stage
 
     if [[ -t 1 && ( -v DISPLAY || $MACHTYPE =~ -apple-darwin ) ]] &&
-           diffuse -h 2> /dev/null | grep -q -- --modified-since
+           diffuse -h 2> /dev/null | grep -q -- --modified-since &&
+           false # diffuse fails to import gtk on my machine, but -h still works
     then
         local modified_since=HEAD
 
