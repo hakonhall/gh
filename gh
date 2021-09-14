@@ -73,9 +73,10 @@ COMMANDS
       ~/.gh.diff to localhost.
   refresh
       Read $CONFIG_FILE and generate $REPOS_FILE cache.
-  save [-m MESSAGE] [PATH...]
-      Save a diff to ~/.gh.diff. With NAME, save to ~/.gh.diff.NAME, or if NAME
-      is a path save to that path. With PATH, only save a diff of those paths.
+  save [-n NAME] [PATH...]
+      Save diff to ~/.gh.diff, limited to PATH if present.  With -n, the diff is
+      saved to the path NAME if it contains a "/", otherwise it is saved to
+      ~/.gh.diff.NAME.
   stack
       Stack commands similar to 'git stash', see 'gh help stack' for more info.
   uncommit
@@ -1930,16 +1931,16 @@ function gh_save {
     do
         case "$1" in
             -n)
-                if [[ "$2" =~ ^[a-zA-Z0-9_-]+$ ]]
+                if [[ "$2" =~ / ]]
                 then
-                    local diff_file=~/.gh.diff."$2"
-                else
-                    local diff_file="$2"
+                    diff_file="$2"
                     local parent_dir=$(dirname "$diff_file")
                     if ! test -d "$parent_dir"
                     then
                         Fail "Parent directory of '$diff_file' doesn't exist"
                     fi
+                else
+                    diff_file=~/.gh.diff."$2"
                 fi
                 shift 2
                 ;;
@@ -2091,6 +2092,72 @@ function gh_stack_show {
 function gh_status {
     Stage
     Run git status --short
+}
+
+function gh_submit {
+    local wait=true open_chrome=true
+    while (( $# > 0 ))
+    do
+        case "$1" in
+            -w) wait=false; shift ;;
+            -o) open_chrome=true; shift ;;
+            -*) UsageError submit "Unknown option: '$1'" ;;
+            *) break ;;
+        esac
+    done
+
+    if (( $# != 1 ))
+    then
+        UsageError submit "Missing TITLE argument"
+    fi
+    local title="$1"
+
+    if ! IsClean
+    then
+        UsageError submit "Files have been changed since last commit"
+    fi
+
+    GetBranch
+    local branch="$OUT"
+
+    if test "$branch" == master
+    then
+        UsageError submit "Cannot submit master branch"
+    fi
+
+    GitHubInfoFromOrigin
+    local endpoint="$OUT"
+    local owner="$OUT2"
+    local repo="$OUT3"
+    local ssh_url="$OUT4"
+
+    if GetPullRequestNumber "$endpoint" "$owner" "$repo" "$branch"
+    then
+        local number="$OUT"
+        local url="$OUT2"
+        UsageError submit "A pull request has already been made: $url"
+    fi
+
+    git push -q -u origin "$branch"
+
+    CreatePullRequest "$endpoint" "$owner" "$repo" "$branch" "$title"
+    local number="$OUT"
+    local url="$OUT2"
+    echo "Created pull request $url"
+
+    if $open_chrome
+    then
+        google-chrome "$url"
+    fi
+
+    if $wait
+    then
+        local approve=false assignee= merge=false ptal=false reviewers=
+
+        WaitForChecksThen "$endpoint" "$owner" "$repo" "$number" \
+                          "$approve" "" "$assignee" "$merge" "$ptal" \
+                          "$reviewers"
+    fi
 }
 
 function GetGitRootRelative {
@@ -2251,20 +2318,23 @@ function CreatePullRequest {
     local owner="$2"
     local repo="$3"
     local branch="$4"
+    local title="$5"  # Optional
 
     local destination_branch="master"
 
-    # TODO: If more than 1 commit ahead of origin/master, we should open an
-    # editor to specify title and body.
-
-    local title
-    title=$(git log -1 --format=%s HEAD)
-
-    local body
-    body=$(git log -1 --format=%b HEAD)
-    if [[ "$body" =~ ^[' '$'\n'$'\r']+$ ]]
+    local body=
+    if test "$title" == ""
     then
-        body=""
+        # TODO: If more than 1 commit ahead of origin/master, we should open an
+        # editor to specify title and body.
+
+        title=$(git log -1 --format=%s HEAD)
+
+        body=$(git log -1 --format=%b HEAD)
+        if [[ "$body" =~ ^[' '$'\n'$'\r']+$ ]]
+        then
+            body=""
+        fi
     fi
 
     RawCreatePullRequest "$destination" "$owner" "$repo" "$branch" \
@@ -2291,9 +2361,8 @@ EOF
 }
 
 function gh_checkin {
-    local assignee="" merge=false ptal=false title=""
-    local escaped_edit_option= reviewers="" wait=true
-    local -a comment=()
+    local assignee="" merge=false ptal=false title="" open_google_chrome=false
+    local escaped_edit_option= reviewers="" wait=true comment=
     while (( $# > 0 ))
     do
         case "$1" in
@@ -2316,6 +2385,10 @@ function gh_checkin {
             -h|--help) gh_help checkin ;;
             -m|--merge)
                 merge=true
+                shift
+                ;;
+            -o|--open)
+                open_google_chrome=true
                 shift
                 ;;
             -p|--ptal)
@@ -2443,6 +2516,11 @@ function gh_checkin {
         local number="$OUT"
         local url="$OUT2"
         echo "Created pull request $url"
+    fi
+
+    if $open_google_chrome
+    then
+        google-chrome "$url"
     fi
 
     if $wait
@@ -3285,7 +3363,7 @@ function WaitForChecks {
 
     local -i sleep_seconds=1
     local pending_message=""
-    local previous_message=""
+    local previous_message="foo"
     while ! CheckStatus "$endpoint" "$owner" "$repo" "$number" "$commit" \
             "$last_comment_id"
     do
@@ -3930,6 +4008,8 @@ declare -A UNOFFICIAL_COMMANDS=(
     [pending]=gh_pending
     [pop]=gh_stack_pop
     [pr]=gh_pr
+    [pub]=gh_submit
+    [publish]=gh_submit
     [push]=gh_stack_push
     [repo]=gh_repo
     [resolve-pr]=gh_resolve_pr
@@ -3943,6 +4023,8 @@ declare -A UNOFFICIAL_COMMANDS=(
     [stage]=Stage
     [stat]=gh_status
     [status]=gh_status
+    [sub]=gh_submit
+    [submit]=gh_submit
     [uncommit]=gh_uncommit
     [up]=gh_update
     [update]=gh_update)
