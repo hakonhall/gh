@@ -2099,7 +2099,7 @@ function gh_submit {
     while (( $# > 0 ))
     do
         case "$1" in
-            -w) wait=false; shift ;;
+            -W) wait=false; shift ;;
             -o) open_chrome=true; shift ;;
             -*) UsageError submit "Unknown option: '$1'" ;;
             *) break ;;
