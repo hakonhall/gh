@@ -457,7 +457,7 @@ function ResolveEndpoint {
 
     JqRaw .token "$json"
     local token="$OUT"
-    local token_regex='^[a-zA-Z0-9=]{40}$'
+    local token_regex='^[a-zA-Z0-9_=]+$'
     if ! [[ "$token" =~ $token_regex ]]
     then
         Fail "Invalid token found in $CONFIG_FILE for endpoint " \
