@@ -771,16 +771,16 @@ query {
         case "$has_next_page" in
             true) : ;;
             false) break ;;
-            *) Fail "Bas hasNextPage value in response: '$has_next_page'" ;;
+            *) Fail "Bad hasNextPage value in response: '$has_next_page'" ;;
         esac
 
         JqRaw ".data.repositoryOwner.repositories.pageInfo.endCursor" \
               "$response_json"
         local end_cursor="$OUT"
 
-        if ! Match '^[a-zA-Z0-9=]+$' "$end_cursor"
+        if ! Match '^[a-zA-Z0-9=_]+$' "$end_cursor"
         then
-            Fail "Bas endCursor value in response: '$end_cursor'"
+            Fail "Bad endCursor value in response: '$end_cursor'"
         fi
 
         ToJsonString "$end_cursor"
