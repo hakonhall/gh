@@ -1257,8 +1257,7 @@ function gh_refresh {
 
                 # This is a terrible regex.
                 local regex="^(.*)$owner/$example_repo(.*)"
-                if ! Match "$regex" "$ssh_url" \
-                     ssh_url_prefix ssh_url_suffix
+                if ! Match "$regex" "$ssh_url" ssh_url_prefix ssh_url_suffix
                 then
                     Fail "Unexpected form of ssh_url doesn't match regex " \
                          "'$regex': '$ssh_url'"
