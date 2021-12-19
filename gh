@@ -43,6 +43,9 @@ declare JQ_VERIFIED=false
 
 declare COMMIT_NOP="    "
 declare COMMIT_PTR=">>> "
+declare -r COMMIT_HELP=\
+"(b)ranch, (c)ommit, (d)iff, (f)etch, (h)elp, down/up (j/k), (l)og, (m)essage,"$'\n'\
+"(o)pen, (p)atch, (q)uit, (s)ubmit, (u)ncommit, (w)ww: "
 
 function Usage {
     local arg
@@ -2162,6 +2165,111 @@ function PrintCommitStack {
     OUTA=("${commits[@]}")
 }
 
+function CommitViewHelp {
+    read -p "Help on which command: " -N 1
+    echo
+    case "$REPLY" in
+        b) cat <<EOF
+branch: Create (if on master) or rename current branch.
+EOF
+           ;;
+        c) cat <<EOF
+commit: Create or update commit based on changes to working directory.
+
+If invoked while pointing to [work], a commit message will be asked for.  If
+the current branch is 'master', a new branch will be created and checked out
+with a name based on the commit message.  Then all modified, added, and removed
+files are added to the commit.
+
+If invoked while pointing to a commit, the working directory changes are added
+to that commit.
+EOF
+           ;;
+        d) cat <<EOF
+diff: See working directory changes (for [work]) or changes intorduced by
+commit.
+EOF
+            ;;
+        f) cat <<EOF
+fetch: git pull --rebase
+EOF
+            ;;
+        h) cat <<EOF
+help: This help.
+EOF
+           ;;
+        j) cat <<EOF
+down: Move cursor down.
+EOF
+            ;;
+        J) cat <<EOF
+down-swap:  Swap the current commit with the next.
+EOF
+            ;;
+        k) cat <<EOF
+up: Move cursor up.
+EOF
+            ;;
+        K) cat <<EOF
+up-swap: Swap the current commit with the previous.
+EOF
+           ;;
+        l) cat <<EOF
+log: View the log.
+EOF
+           ;;
+        m) cat <<EOF
+message: Change the message of the commit.
+EOF
+           ;;
+        o) cat <<EOF
+open: Open menu on current working directory (gh menu).
+EOF
+           ;;
+        p) cat <<EOF
+(p)atch: Create or update commit based on changes to working directory using
+'git add --patch'.  This allows individual hunks to be included or excluded.
+
+If invoked while pointing to [work], a commit message will be asked for.  If
+the current branch is 'master', a new branch will be created and checked out
+with a name based on the commit message.  Then all modified, added, and removed
+files are added to the commit (with --patch).
+
+If invoked while pointing to a commit, the working directory changes are added
+to that commit (with --patch).
+EOF
+           ;;
+        q) cat <<EOF
+quit: quit program.
+EOF
+           ;;
+        r) cat <<EOF
+refresh: Reprint commit view.
+EOF
+           ;;
+        s) cat <<EOF
+submit: Submit changes to 'origin' and create PR unless it already exists.
+EOF
+           ;;
+        u) cat <<EOF
+uncommit:  Removes the last commit without modifying any files.
+
+This command pretends the last commit was just made (git commit), and undoes it.
+EOF
+           ;;
+        w) cat <<EOF
+www: Open the associated PR in Google Chrome, if any.
+EOF
+           ;;
+        *) cat <<EOF
+No command associated with '$REPLY'"
+EOF
+           ;;
+    esac
+    read -p "Press any key to continue... " -N 1
+    read -t 0.01 || true # To consume e.g. arrow key which has >1 characters
+}
+
 # TODO: No longer stage: One has to break changes into several commits much more
 #       often.  So support git add -i (see --patch for various subcommands),
 #       and have a separate line for worktree and index/cache/staging. Or,
@@ -2175,14 +2283,6 @@ function PrintCommitStack {
 #       "1" or hakonhall/1 or tmp or work or hakonhall/tmp.
 # TODO: Also view stash over worktree
 # TODO: Allow open of of editor when submitting
-# Arrow keys:
-#  - ESC [ A  arrow up
-#  - ESC [ B  arrow down
-#  - ESC [ C  arrow right
-#  - ESC [ D  arrow left
-#  - ESC = 0x1b
-#  - [ = 0x5b
-#  - A = 0x41
 function CommitView {
 
     GetBranch
@@ -2255,10 +2355,7 @@ function CommitView {
             commit="${commits[$commit_idx]}"
         fi
 
-        local p
-p="(b)ranch, (c)ommit, (d)iff, (f)etch, down/up (j/k), (l)og, (m)essage,"$'\n'\
-"(o)pen, (p)atch, (q)uit, (s)ubmit, (u)ncommit, (w)ww: "
-        read -p "$p" -N 1
+        read -p "$COMMIT_HELP" -N 1
         local command="$REPLY"
 
         # Canonicalize
@@ -2398,6 +2495,10 @@ p="(b)ranch, (c)ommit, (d)iff, (f)etch, down/up (j/k), (l)og, (m)essage,"$'\n'\
                 # 'git <command> [<revision>...] -- [<file>...]'
                 git pull -q --rebase
                 base_commit=""  # trigger recalculation of base_commit
+                ;;
+            h)
+                echo
+                CommitViewHelp
                 ;;
             j)
                 echo
@@ -2590,10 +2691,7 @@ p="(b)ranch, (c)ommit, (d)iff, (f)etch, down/up (j/k), (l)og, (m)essage,"$'\n'\
                 ;;
             o)
                 echo
-                if test "$ptr" == work && ! IsClean
-                then
-                    exec "$0" menu
-                fi
+                exec "$0" menu
                 ;;
             #p) see c)
             q)
@@ -2662,6 +2760,7 @@ p="(b)ranch, (c)ommit, (d)iff, (f)etch, down/up (j/k), (l)og, (m)essage,"$'\n'\
                 fi
                 ;;
             w)
+                echo
                 if test "$url" != ""
                 then
                     google-chrome "$url"
