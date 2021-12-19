@@ -3905,6 +3905,23 @@ function AddReviewers {
     echo "${reviewers[*]} set to review PR"
 }
 
+function gh_help_wait {
+    cat <<EOF
+Usage: gh wait [OPTION...] [PR_URL]
+Wait for checks to pass.
+
+Options are applied if and after the checks pass:
+  --approve|-A|+1       Approve PR
+  --assignee|-a USER    Assign PR to USER
+  --comment|-c COMMENT  Add comment
+  --merge|-m            Merge pull request, delete branch, and check out master
+  --ptal|-p             Ask reviewers and assignees to take another look
+  --reviewers|-r USERS  Comma-separated list of reviewers
+EOF
+
+    exit 0
+}
+
 function gh_wait {
     local assignee= approve=false comment= merge=false ptal=false reviewers=
     while (($# > 0))
