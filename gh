@@ -41,6 +41,9 @@ declare -A OUTH=() OUTH2=()
 declare CURL_VERIFIED=false
 declare JQ_VERIFIED=false
 
+declare COMMIT_NOP="    "
+declare COMMIT_PTR=">>> "
+
 function Usage {
     local arg
     for arg in "$@"
@@ -1112,6 +1115,9 @@ EOF
                     need_get_status=true
                     
                     ;;
+                u)
+                    exec "$0" view
+                    ;;
                 x)
                     if test "${selected_files[$current_file]}" == ""
                     then
@@ -1295,6 +1301,7 @@ function gh_refresh {
     rm "$repos_workfile"
 }
 
+# TODO: Get remote from: git rev-parse --abbrev-ref @{upstream}
 function GitHubInfoFromOrigin {
     # Unfortunately get-url isn't supported by git on RHEL 7, so we have to
     # extract URL from 'git remote -v'.
@@ -2093,13 +2100,596 @@ function gh_status {
     Run git status --short
 }
 
+function PrintCommitStack {
+    local base_commit="$1"
+    local ptr="$2"
+    local commit_idx="$3"
+
+    local shortstat
+    Stage
+    shortstat=$(git diff --shortstat HEAD)
+
+    local work_commit="[work]$shortstat"
+    if test "$ptr" == work
+    then
+        echo "$COMMIT_PTR$work_commit"
+    else
+        echo "$COMMIT_NOP$work_commit"
+    fi
+
+    local -a commits=()
+
+    local commit
+    commit=$(git rev-parse HEAD)
+
+    local -i idx=0
+    while true
+    do
+        if test "$commit" == "$base_commit"
+        then
+            break
+        fi
+
+        commits+=("$commit")
+
+        local infoline
+        infoline=$(git log --oneline -n 1 "$commit")
+        if test "$ptr" == commits && (( commit_idx == idx ))
+        then
+            echo "$COMMIT_PTR$infoline"
+        else
+            echo "$COMMIT_NOP$infoline"
+        fi
+
+        if (( idx++ >= 100 ))
+        then
+            Fail "Failed to find the common ancestor commit within the " \
+                 "last 100 commits"
+        fi
+
+        local -a parents=()
+        parents=$(git log --pretty=%P -n 1 "$commit")
+        local -i num_parents="${#parents[@]}"
+        if (( num_parents != 1 ))
+        then
+            Fail "Expected exactly 1 parent commit of $commit, but found " \
+                 "$num_parents"
+        fi
+
+        commit="${parents[0]}"
+    done
+
+    OUTA=("${commits[@]}")
+}
+
+# TODO: No longer stage: One has to break changes into several commits much more
+#       often.  So support git add -i (see --patch for various subcommands),
+#       and have a separate line for worktree and index/cache/staging. Or,
+#       only patch with commit, so leave the hunks not included in worktree.
+#       Or, stash that which is not included.
+# TODO: Listen to change in working tree and update automatically
+# TODO: Avoid printing (no local changes): just don't print the line.  Must
+#       handle no local changes and no commits.
+# TODO: Start out on a working branch. e.g. 1/hv/vespa =>
+#       hakonhall/1-hv-vespa or hakonhall/1-github-vespa--engine-vespa or
+#       "1" or hakonhall/1 or tmp or work or hakonhall/tmp.
+# TODO: Also view stash over worktree
+# TODO: Allow open of of editor when submitting
+# Arrow keys:
+#  - ESC [ A  arrow up
+#  - ESC [ B  arrow down
+#  - ESC [ C  arrow right
+#  - ESC [ D  arrow left
+#  - ESC = 0x1b
+#  - [ = 0x5b
+#  - A = 0x41
+function CommitView {
+
+    GetBranch
+    local branch="$OUT"
+
+    GitHubInfoFromOrigin
+    local endpoint="$OUT"
+    local owner="$OUT2"
+    local repo="$OUT3"
+    local ssh_url="$OUT4"
+
+    # TODO: Get proper user from ResolveEndpoint
+    local tmpbranch=hakonhall/tmp
+
+    local upstream="" base_commit="" number="" url=""
+    local ptr=work # or commits
+    local -i commit_idx=0
+
+    while true
+    do
+        if test "$upstream" == ""
+        then
+            base_commit=""
+            if upstream=$(git rev-parse --abbrev-ref '@{u}' 2>/dev/null)
+            then
+                :
+            elif (( $? == 128 ))
+            then
+                Fail "No upstream found: Please set an upstream with: " \
+                     "git branch -u <upstream>"
+            else
+                Fail "No upstream found: " \
+                     "'git rev-parse --abbrev-ref @{u}' failed"
+            fi
+
+            # Creating a pull request below also fetches number&url
+            # TODO: This piece of code means this method requires net access to
+            # remote!
+            if test "$number" == "" &&
+               test "$upstream" != origin/master && \
+               test "$upstream" != master && \
+               GetPullRequestNumber "$endpoint" "$owner" "$repo" \
+                                         "$branch"
+            then
+                number="$OUT"
+                url="$OUT2"
+            fi
+        fi
+
+        if test "$base_commit" == "" && \
+           ! base_commit=$(git merge-base "$upstream" HEAD)
+        then
+            Fail "Failed to find a common ancestor commit between HEAD and " \
+                 "'$upstream'"
+        fi
+
+        if test "$number" != ""
+        then
+            echo "$url"
+        fi
+        echo "$endpoint:$owner/$repo#$branch"
+
+        PrintCommitStack "$base_commit" "$ptr" "$commit_idx"
+        local -a commits=("${OUTA[@]}")
+        local -i num_commits="${#commits[@]}"
+
+        local commit=""
+        if test "$ptr" == commits
+        then
+            commit="${commits[$commit_idx]}"
+        fi
+
+        local p
+p="(b)ranch, (c)ommit, (d)iff, (f)etch, down/up (j/k), (l)og, (m)essage,"$'\n'\
+"(o)pen, (p)atch, (q)uit, (s)ubmit, (u)ncommit, (w)ww: "
+        read -p "$p" -N 1
+        local command="$REPLY"
+
+        # Canonicalize
+        case "$command" in
+             $'\e')
+                 REPLY=""
+                 if read -N 1 -t 0.2 && test "$REPLY" == '['
+                 then
+                     if read -N 1 -t 0.2
+                     then
+                         case "$REPLY" in
+                             A)
+                                 # up arrow = up
+                                 command=k
+                                 ;;
+                             B)
+                                 # down arrow = down
+                                 command=j
+                                 ;;
+                             C)
+                                 # right arrow = open
+                                 command=o
+                                 ;;
+                             D)
+                                 # left arrow
+                                 :
+                                 ;;
+                             1)
+                                 if read -N 3 -t 0.1
+                                 then
+                                     case "$REPLY" in
+                                         ';2A')
+                                             # shift-k
+                                             command=K
+                                             ;;
+                                         ';2B')
+                                             # shift-j
+                                             command=J
+                                             ;;
+                                     esac
+                                 fi
+                                 ;;
+                         esac
+                     fi
+                 fi
+                 ;;
+        esac
+
+        case "$command" in
+            b)
+                echo
+                if test "$upstream" == origin/master || \
+                   test "$upstream" == master
+                then
+                    if test "$branch" == master
+                    then
+                        read -e -p "Branch name: "
+                        branch="$REPLY"
+                        git checkout -q -b "$branch" -t "$upstream"
+                    else
+                        read -e -p "Rename branch to: " -i "$branch"
+                        branch="$REPLY"
+                        git branch -m "$branch"
+                    fi
+                fi
+                ;;
+            c|p)
+                echo
+                if ! IsClean
+                then
+                    if test "$ptr" == work
+                    then
+                        Stage
+                        if test "$REPLY" == p
+                        then
+                            git restore --staged .
+                            git add -p
+                        fi
+                        read -e -p "Message: "
+                        local message="$REPLY"
+                        if test "$message" != ""
+                        then
+                            if test "$branch" == master
+                            then
+                                GetBranchName "$message" "$endpoint"
+                                branch="$OUT"
+                                git checkout -q -b "$branch"
+                                git branch -u "$upstream"
+                            fi
+
+                            git commit -q -m "$message"
+                            ptr=commits
+                            commit_idx=0
+                        fi
+                    else
+                        # Add changes in work to commit commit
+                        Stage
+                        if test "$REPLY" == p
+                        then
+                            git restore --staged .
+                            git add -p
+                        fi
+
+                        if ! git commit -q --fixup "$commit"
+                        then
+                            Fail "Failed: git commit --quiet --fixup " \
+                                 "'$commit'"
+                        fi
+
+                        if ! GIT_SEQUENCE_EDITOR=true git rebase -i --autosquash
+                        then
+                            Fail "Failed: git rebase --autosquash"
+                        fi
+                    fi
+                fi
+                ;;
+            d)
+                echo
+                if test "$ptr" == work
+                then
+                    Stage
+                    LESS=SR git diff HEAD
+                else
+                    # Default is LESS=FSRX
+                    LESS=SR git diff "$commit"^ "$commit"
+                fi
+                ;;
+            f)
+                echo
+                # TODO: Got the following with 'f':
+                # corp:vespa/vespa-yahoo#hakonhall/pick-the-mountpoint-closest-to-the-path
+                # >>> [work]
+                #     e5c99dfefd Pick the mountpoint closest to the path
+                #     91c949bdfb Merge pull request #7899 from vespa/mpolden/fix-replacement
+                # fatal: ambiguous argument 'eeba43def402581111343f7d910e8c0aaa101941 4e9c5bf8175df7837cabd23791ffa0ad907b4cbf': unknown revision or path not in the working tree.
+                # Use '--' to separate paths from revisions, like this:
+                # 'git <command> [<revision>...] -- [<file>...]'
+                git pull -q --rebase
+                base_commit=""  # trigger recalculation of base_commit
+                ;;
+            j)
+                echo
+                if test "$ptr" == work
+                then
+                    if (( num_commits > 0 ))
+                    then
+                        ptr=commits
+                        commit_idx=0
+                    fi
+                elif (( commit_idx + 1 < num_commits ))
+                then
+                    commit_idx+=1
+                fi
+                ;;
+            J)
+                echo
+                if test "$ptr" == work
+                then
+                    echo "Moving work down beyond a commit is not supported"
+                    read -e -N 1 -p "Press any key to continue... "
+                elif ! IsClean
+                then
+                    echo "Unable to move commit down with dirty work"
+                    read -e -N 1 -p "Press any key to continue... "
+                elif (( commit_idx + 1 < num_commits ))
+                then
+                    local down_idx=$(( commit_idx + 1 ))
+                    local down_commit="${commits[$down_idx]}"
+
+                    local down_parents
+                    down_parents=$(git log --pretty=%P -n 1 "$down_commit")
+                    local -i num_down_parents="${#down_parents[@]}"
+                    if (( num_down_parents != 1 ))
+                    then
+                        Fail "Expected exactly 1 parent commit of " \
+                             "$down_commit, but found $num_down_parents"
+                    fi
+                    local down2_commit="${down_parents[0]}"
+
+                    # Swap the 2 commits 'commit' and 'down_commit' in the
+                    # commit sequence:
+                    #   commits[0] = HEAD
+                    #   commits[1]
+                    #   ...
+                    #   commits[commit_idx - 1]
+                    #   commits[commit_idx] = commit
+                    #   commits[commit_idx + 1] = down_commit
+                    #   down2_commit
+
+                    git branch -q -D "$tmpbranch" 2>/dev/null || true
+                    git checkout -q -b "$tmpbranch" "$down2_commit"
+                    git branch -q -u "$upstream"
+                    git cherry-pick "$commit"
+                    git cherry-pick "$down_commit"
+
+                    if (( commit_idx == 0 ))
+                    then
+                        git branch -q -M "$tmpbranch" "$branch"
+                    else
+                        git rebase -q --onto "$tmpbranch" "$commit" "$branch"
+                    fi
+
+                    commit_idx+=1
+                fi
+                ;;
+            k)
+                echo
+                if test "$ptr" == commits
+                then
+                    if (( commit_idx > 0 ))
+                    then
+                        commit_idx+=-1
+                    else
+                        ptr=work
+                    fi
+                fi
+                ;;
+            K)
+                echo
+                if test "$ptr" == work
+                then
+                    echo "Moving work up is not supported"
+                    read -e -N 1 -p "Press any key to continue... "
+                elif ! IsClean
+                then
+                    echo "Unable to move commit up with dirty work"
+                    read -e -N 1 -p "Press any key to continue... "
+                elif (( commit_idx > 0 ))
+                then
+                    local up_idx=$(( commit_idx - 1 ))
+                    local up_commit="${commits[$up_idx]}"
+
+                    local parents
+                    parents=$(git log --pretty=%P -n 1 "$commit")
+                    local -i num_parents="${#parents[@]}"
+                    if (( num_parents != 1 ))
+                    then
+                        Fail "Expected exactly 1 parent commit of " \
+                             "$commit, but found $num_parents"
+                    fi
+                    local down_commit="${parents[0]}"
+
+                    # Swap the 2 commits 'up_commit' and 'commit' in the
+                    # commit sequence:
+                    #   commits[0] = HEAD
+                    #   commits[1]
+                    #   ...
+                    #   commits[commit_idx - 2]
+                    #   commits[commit_idx - 1] = up_commit
+                    #   commits[commit_idx] = commit
+                    #   down_commit
+
+                    git branch -q -D "$tmpbranch" 2>/dev/null || true
+                    git checkout -q -b "$tmpbranch" "$down_commit"
+                    git branch -q -u "$upstream"
+                    git cherry-pick "$up_commit"
+                    git cherry-pick "$commit"
+
+                    if (( commit_idx == 1 ))
+                    then
+                        git branch -q -M "$tmpbranch" "$branch"
+                    else
+                        git rebase -q --onto "$tmpbranch" "$up_commit" "$branch"
+                    fi
+
+                    commit_idx+=-1
+                fi
+                ;;
+            l)
+                echo
+                if test "$ptr" == work
+                then
+                    # '-+X' ensures view is restored when less is quit.
+                    # '-R' enables color, '-S' truncates lines.
+                    # returns with exit code 141 because of SIGPIPE received by
+                    # git when less exits before reaching EOF.
+                    GIT_PAGER='less -+FX -RS' git log --graph || true
+                else
+                    # '-+X' ensures view is restored when less is quit.
+                    # '-R' enables color, '-S' truncates lines.
+                    # returns with exit code 141 because of SIGPIPE received by
+                    # git when less exits before reaching EOF.
+                    GIT_PAGER='less -+FX -RS' git log -n 1 "$commit" || true
+                fi
+                ;;
+            m)
+                echo
+                if test "$ptr" == commits
+                then
+                    local current
+                    current=$(git log --pretty='format:%s' -n 1 "$commit")
+
+                    read -e -i "$current" -p "Message: "
+                    if test "$REPLY" == ""
+                    then
+                        echo Message not changed
+                    else
+                        local message="$REPLY"
+
+                        if IsClean
+                        then
+                            local is_clean=true
+                        else
+                            local is_clean=false
+                            git reset -q HEAD
+                            git stash push -q -u
+                        fi
+
+                        git branch -q -D "$tmpbranch" 2>/dev/null || true
+                        git checkout -q -b "$tmpbranch" "$commit"
+                        git branch -q -u "$upstream"
+                        git commit -q --amend -m "$message"
+
+                        local branch_commit
+                        branch_commit=$(git rev-parse "$branch")
+                        if test "$commit" == "$branch_commit"
+                        then
+                            git branch -q -M "$tmpbranch" "$branch"
+                        else
+                            git rebase -q --onto "$tmpbranch" "$commit" "$branch"
+                        fi
+
+                        if ! $is_clean
+                        then
+                            git stash pop -q
+                        fi
+                    fi
+                fi
+                ;;
+            o)
+                echo
+                if test "$ptr" == work && ! IsClean
+                then
+                    exec "$0" menu
+                fi
+                ;;
+            #p) see c)
+            q)
+                echo
+                break
+                ;;
+            r)
+                echo
+                # Refresh - do nothing then loop around
+                ;;
+            s)
+                echo
+
+                # If creating a  PR (first submit): Get title and  message of PR
+                # (empty, ends  in "...", or  S => open editor?),  rename branch
+                # from title, commit any  outstanding changes with message, push
+                # to remote, make PR, open PR in browser.
+                #
+                # If reviewers are added: wait  for checks except (1) merge stop
+                # and (2) approvers check, add  reviewers, wait until all checks
+                # pass, merge.
+                #
+                # WARNING:  upstream may  be  origin/master  before first  push.
+                # WARNING: push explicitly to orign  and branch name, and ensure
+                # branch name isn't master.
+
+                if test "$branch" != master && IsClean && \
+                        (( ${#commits[@]} > 0 ))
+                then
+                    git push -q -u origin "$branch"
+
+                    if test "$number" == ""
+                    then
+                        read -e -p "PR title: "
+                        local title="$REPLY"
+
+                        CreatePullRequest "$endpoint" "$owner" "$repo" \
+                                          "$branch" "$title"
+                        number="$OUT"
+                        url="$OUT2"
+                        echo "Created pull request $url"
+
+                        upstream=""  # Will be update on next iteration
+
+                        read -e -p "Reviewers: "
+                        local reviewers="$REPLY"
+                        if test "$reviewers" != ""
+                        then
+                            LookupReviewers "$endpoint" "$owner" "$repo" \
+                                            "$reviewers"
+                            reviewers="$OUT"
+
+                            AddReviewers "$endpoint" "$owner" "$repo" \
+                                         "$number" "$reviewers"
+                        fi
+                    fi
+                fi
+                ;;
+            u)
+                echo
+                if test "$ptr" == commits && (( commit_idx == 0 ))
+                then
+                    git reset --soft HEAD^
+                    Stage
+                    ptr=work
+                fi
+                ;;
+            w)
+                if test "$url" != ""
+                then
+                    google-chrome "$url"
+                fi
+                ;;
+            $'\n')
+                :
+                ;;
+            *)
+                echo
+                echo "Unknown command: '$REPLY'"
+                ;;
+        esac
+    done
+}
+
+function gh_view {
+    CommitView
+}
+
 function gh_submit {
     local wait=true open_chrome=true
     while (( $# > 0 ))
     do
         case "$1" in
-            -W) wait=false; shift ;;
+            -w) wait=false; shift ;;
             -o) open_chrome=true; shift ;;
+            -O) open_chrome=false; shift ;;
             -*) UsageError submit "Unknown option: '$1'" ;;
             *) break ;;
         esac
@@ -2348,15 +2938,41 @@ Commit with MESSAGE and a branch derived from MESSAGE, and push to remote.
 
 Options:
   --                       Any next argument is interpreted as MESSAGE.
-  --assignee,-a ASSIGNEE   Assign pull request to ASSIGNEE.
+  --assignee,-a USER       Assign pull request to USER.
   --comment,-c COMMENT     Use MESSAGE for branch name, and COMMENT for commit.
   --edit,-e                Edit the commit message (MESSAGE) before committing.
   --merge,-m               Merge once all pull request checks pass.
+  --open,-o                Open pull request in Google Chrome.
   --ptal,-p                Add a PTAL message to the pull request.
-  --reviewers,-r REVS      Set the pull request reviewers to REVS, once the
+  --reviewers,-r USERS     Set the pull request reviewers to USERS, once the
                            pull request checks pass.
+  --no-wait,-w             Do not wait for checks to pass.
 EOF
     exit 0
+}
+
+function GetBranchName {
+    local title="$1"
+    local endpoint="$2"
+
+    local branch="${title,,}"
+    branch=$(printf "%s" "$branch" | tr ' ' - | tr -Cd '[:alnum:]-')
+    if test "$branch" == ""
+    then
+        Fail "Failed to find a good branch name from '$title'"
+    fi
+
+    ResolveEndpoint "$endpoint"
+    local user="$OUT2"
+
+    if test "$owner" == vespa -a "$repo" == vespa-yahoo
+    then
+            # HACK: Special code invoked when branch are identical, so force
+            # one user.  Don't merge this gh version...
+            user=hakonhall
+    fi
+
+    OUT="$user/$branch"
 }
 
 function gh_checkin {
@@ -2448,12 +3064,8 @@ function gh_checkin {
         fi
         local title="$1"
 
-        branch="${title,,}"
-        branch=$(printf "%s" "$branch" | tr ' ' - | tr -Cd '[:alnum:]-')
-        if test "$branch" == ""
-        then
-            Fail "Failed to find a good branch name from the title '$title'"
-        fi
+        GetBranchName "$title"
+        branch="$OUT"
 
         if test "$comment" == ""
         then
@@ -2461,18 +3073,6 @@ function gh_checkin {
         else
             local message="$comment"
         fi
-
-        ResolveEndpoint "$endpoint"
-        local user="$OUT2"
-
-        if test "$owner" == vespa -a "$repo" == vespa-yahoo
-        then
-            # HACK: Special code invoked when branch are identical, so force
-            # one user.  Don't merge this gh version...
-            user=hakonhall
-        fi
-
-        branch="$user/$branch"
 
         Stage
         git stash save --quiet --include-untracked
@@ -3905,6 +4505,23 @@ function AddReviewers {
     echo "${reviewers[*]} set to review PR"
 }
 
+function gh_help_wait {
+    cat <<EOF
+Usage: gh wait [OPTION...] [PR_URL]
+Wait for checks to pass.
+
+Options are applied if and after the checks pass:
+  --approve|-A|+1       Approve PR
+  --assignee|-a USER    Assign PR to USER
+  --comment|-c COMMENT  Add comment
+  --merge|-m            Merge pull request, delete branch, and check out master
+  --ptal|-p             Ask reviewers and assignees to take another look
+  --reviewers|-r USERS  Comma-separated list of reviewers
+EOF
+
+    exit 0
+}
+
 function gh_wait {
     local assignee= approve=false comment= merge=false ptal=false reviewers=
     while (($# > 0))
@@ -4026,7 +4643,9 @@ declare -A UNOFFICIAL_COMMANDS=(
     [submit]=gh_submit
     [uncommit]=gh_uncommit
     [up]=gh_update
-    [update]=gh_update)
+    [update]=gh_update
+    [v]=gh_view
+    [view]=gh_view)
 
 declare -A DANGEROUS_COMMANDS=(
     [--help]=gh_help
@@ -4042,7 +4661,8 @@ declare -A DANGEROUS_COMMANDS=(
 function Main {
     if (( $# == 0 ))
     then
-        UsageError '' "No command given"
+        set - v
+        #UsageError '' "No command given"
     fi
 
     local command="$1"
