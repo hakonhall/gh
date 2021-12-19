@@ -2582,10 +2582,7 @@ p="(b)ranch, (c)ommit, (d)iff, (f)etch, down/up (j/k), (l)og, (m)essage,"$'\n'\
                 ;;
             o)
                 echo
-                if test "$ptr" == work && ! IsClean
-                then
-                    exec "$0" menu
-                fi
+                exec "$0" menu
                 ;;
             #p) see c)
             q)
