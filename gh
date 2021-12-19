@@ -2175,14 +2175,6 @@ function PrintCommitStack {
 #       "1" or hakonhall/1 or tmp or work or hakonhall/tmp.
 # TODO: Also view stash over worktree
 # TODO: Allow open of of editor when submitting
-# Arrow keys:
-#  - ESC [ A  arrow up
-#  - ESC [ B  arrow down
-#  - ESC [ C  arrow right
-#  - ESC [ D  arrow left
-#  - ESC = 0x1b
-#  - [ = 0x5b
-#  - A = 0x41
 function CommitView {
 
     GetBranch
