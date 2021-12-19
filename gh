@@ -2651,6 +2651,7 @@ p="(b)ranch, (c)ommit, (d)iff, (f)etch, down/up (j/k), (l)og, (m)essage,"$'\n'\
                 fi
                 ;;
             w)
+                echo
                 if test "$url" != ""
                 then
                     google-chrome "$url"
