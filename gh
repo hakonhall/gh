@@ -45,7 +45,7 @@ declare COMMIT_NOP="    "
 declare COMMIT_PTR=">>> "
 declare -r COMMIT_HELP=\
 "(b)ranch, (c)ommit, (d)iff, (f)etch, (h)elp, down/up (j/k), (l)og, (m)essage,"$'\n'\
-"(o)pen, (p)atch, (q)uit, (s)ubmit, (u)ncommit, (w)ww: "
+"(o)pen, (p)atch, (q)uit, (s/S)ubmit, (u)ncommit, (w)ww: "
 
 function Usage {
     local arg
@@ -2249,6 +2249,10 @@ EOF
            ;;
         s) cat <<EOF
 submit: Submit changes to 'origin' and create PR unless it already exists.
+
+'S' commits any modifications in the working directory before submitting, and
+may create a branch (based on the commit's message) if on master.  And if no PR
+is associated with the branch the PR's title will be the commit's message.
 EOF
            ;;
         u) cat <<EOF
@@ -2413,12 +2417,18 @@ function CommitView {
                     if test "$branch" == master
                     then
                         read -e -p "Branch name: "
-                        branch="$REPLY"
-                        git checkout -q -b "$branch" -t "$upstream"
+                        if test "$REPLY" != ""
+                        then
+                            branch="$REPLY"
+                            git checkout -q -b "$branch" -t "$upstream"
+                        fi
                     else
                         read -e -p "Rename branch to: " -i "$branch"
-                        branch="$REPLY"
-                        git branch -m "$branch"
+                        if test "$REPLY" != ""
+                        then
+                            branch="$REPLY"
+                            git branch -m "$branch"
+                        fi
                     fi
                 fi
                 ;;
@@ -2519,11 +2529,11 @@ function CommitView {
                 if test "$ptr" == work
                 then
                     echo "Moving work down beyond a commit is not supported"
-                    read -e -N 1 -p "Press any key to continue... "
+                    read -N 1 -p "Press any key to continue... "
                 elif ! IsClean
                 then
                     echo "Unable to move commit down with dirty work"
-                    read -e -N 1 -p "Press any key to continue... "
+                    read -N 1 -p "Press any key to continue... "
                 elif (( commit_idx + 1 < num_commits ))
                 then
                     local down_idx=$(( commit_idx + 1 ))
@@ -2582,11 +2592,11 @@ function CommitView {
                 if test "$ptr" == work
                 then
                     echo "Moving work up is not supported"
-                    read -e -N 1 -p "Press any key to continue... "
+                    read -N 1 -p "Press any key to continue... "
                 elif ! IsClean
                 then
                     echo "Unable to move commit up with dirty work"
-                    read -e -N 1 -p "Press any key to continue... "
+                    read -N 1 -p "Press any key to continue... "
                 elif (( commit_idx > 0 ))
                 then
                     local up_idx=$(( commit_idx - 1 ))
@@ -2702,7 +2712,7 @@ function CommitView {
                 echo
                 # Refresh - do nothing then loop around
                 ;;
-            s)
+            s|S)
                 echo
 
                 # If creating a  PR (first submit): Get title and  message of PR
@@ -2718,34 +2728,76 @@ function CommitView {
                 # WARNING: push explicitly to orign  and branch name, and ensure
                 # branch name isn't master.
 
-                if test "$branch" != master && IsClean && \
-                        (( ${#commits[@]} > 0 ))
+                local abort=false
+                local message=""
+                if IsClean
+                then
+                    if test "$branch" == master
+                    then
+                        echo "Refuse to submit: On 'master' branch"
+                        abort=true
+                    fi
+                elif test "$command" == s
+                then
+                    echo "Refuse to submit: working directory contains modifications"
+                    abort=true
+                else
+                    # i.e. command == S
+                    read -e -p "Title: "
+                    if test "$REPLY" == ""
+                    then
+                        abort=true
+                    else
+                        message="$REPLY"
+                        if test "$branch" == master
+                        then
+                            GetBranchName "$message" "$endpoint"
+                            branch="$OUT"
+                            git checkout -q -b "$branch"
+                            git branch -u "$upstream"
+                        fi
+
+                        Stage
+                        git commit -m "$message"
+                        # WARNING: commit_idx, commit, commits array, etc are
+                        # now wrong
+                    fi
+                fi
+
+                if ! $abort
                 then
                     git push -q -u origin "$branch"
+                    upstream=""  # Will be update on next iteration
+                    ptr=work
+                    commit_idx=0
 
                     if test "$number" == ""
                     then
-                        read -e -p "PR title: "
-                        local title="$REPLY"
-
-                        CreatePullRequest "$endpoint" "$owner" "$repo" \
-                                          "$branch" "$title"
-                        number="$OUT"
-                        url="$OUT2"
-                        echo "Created pull request $url"
-
-                        upstream=""  # Will be update on next iteration
-
-                        read -e -p "Reviewers: "
-                        local reviewers="$REPLY"
-                        if test "$reviewers" != ""
+                        if test "$message" == ""
                         then
-                            LookupReviewers "$endpoint" "$owner" "$repo" \
-                                            "$reviewers"
-                            reviewers="$OUT"
+                            read -e -p "PR title: "
+                            message="$REPLY"
+                        fi
 
-                            AddReviewers "$endpoint" "$owner" "$repo" \
-                                         "$number" "$reviewers"
+                        if test "$message" != ""
+                        then
+                            CreatePullRequest "$endpoint" "$owner" "$repo" \
+                                              "$branch" "$message"
+                            number="$OUT"
+                            url="$OUT2"
+                            echo "Created pull request $url"
+
+                            read -e -p "Reviewers: "
+                            local reviewers="$REPLY"
+                            if test "$reviewers" != ""
+                            then
+                                LookupReviewers "$endpoint" "$owner" "$repo" \
+                                                "$reviewers"
+                                reviewers="$OUT"
+
+                                AddReviewers "$endpoint" "$owner" "$repo" \
+                                             "$number" "$reviewers"
+                            fi
                         fi
                     fi
                 fi
