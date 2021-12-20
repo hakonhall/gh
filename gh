@@ -3236,7 +3236,7 @@ function gh_checkin {
         fi
         local title="$1"
 
-        GetBranchName "$title"
+        GetBranchName "$title" "$endpoint"
         branch="$OUT"
 
         if test "$comment" == ""
