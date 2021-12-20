@@ -44,8 +44,8 @@ declare JQ_VERIFIED=false
 declare COMMIT_NOP="    "
 declare COMMIT_PTR=">>> "
 declare -r COMMIT_HELP=\
-"(b)ranch, (c)ommit, (d)iff, (f)etch, (h)elp, down/up (j/k), (l)og, (m)essage,"$'\n'\
-"(o)pen, (p)atch, (q)uit, (s/S)ubmit, (u)ncommit, (w)ww: "
+"(b)ranch, (c)ommit, (d)iff, (f)etch, (h)elp, (H)ead, down/up (j/k), (l)og,"$'\n'\
+"(m)essage, (o)pen, (p)atch, (q)uit, (s/S)ubmit, (u)ncommit, (w)ww: "
 
 function Usage {
     local arg
@@ -2198,6 +2198,10 @@ EOF
 help: This help.
 EOF
            ;;
+        H) cat <<EOF
+head: Check out master and pull.
+EOF
+           ;;
         j) cat <<EOF
 down: Move cursor down.
 EOF
@@ -2510,6 +2514,21 @@ function CommitView {
                 echo
                 CommitViewHelp
                 ;;
+            H)
+                echo
+                if IsClean
+                then
+                    git checkout -q master
+                    git pull --rebase
+                    upstream=""
+                    ptr=work
+                    commit_idx=0
+                else
+                    echo "Refuse to check out head on master: working directory contains changes"
+                    read -N 1 -p "Press any key to continue... "
+                    read -t 0.01 || true # flush extraneous chars
+                fi
+                ;;
             j)
                 echo
                 if test "$ptr" == work
@@ -2530,10 +2549,12 @@ function CommitView {
                 then
                     echo "Moving work down beyond a commit is not supported"
                     read -N 1 -p "Press any key to continue... "
+                    read -t 0.01 || true # flush extraneous chars
                 elif ! IsClean
                 then
                     echo "Unable to move commit down with dirty work"
                     read -N 1 -p "Press any key to continue... "
+                    read -t 0.01 || true # flush extraneous chars
                 elif (( commit_idx + 1 < num_commits ))
                 then
                     local down_idx=$(( commit_idx + 1 ))
