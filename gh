@@ -2519,7 +2519,7 @@ function CommitView {
                 if IsClean
                 then
                     git checkout -q master
-                    git pull --rebase
+                    git pull -q --rebase
                     upstream=""
                     ptr=work
                     commit_idx=0
