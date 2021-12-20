@@ -2274,8 +2274,22 @@ No command associated with '$REPLY'"
 EOF
            ;;
     esac
+    PressAnyKey
+}
+
+function PressAnyKey {
+    if (( $# > 0 ))
+    then
+        printf "%s" "$@"
+        echo
+    fi
+
     read -p "Press any key to continue... " -N 1
-    read -t 0.01 || true # To consume e.g. arrow key which has >1 characters
+    if test "$REPLY" != $'\n'
+    then
+        echo
+    fi
+    read -t 0.01 || true # flush extraneous chars
 }
 
 # TODO: No longer stage: One has to break changes into several commits much more
@@ -2524,9 +2538,8 @@ function CommitView {
                     ptr=work
                     commit_idx=0
                 else
-                    echo "Refuse to check out head on master: working directory contains changes"
-                    read -N 1 -p "Press any key to continue... "
-                    read -t 0.01 || true # flush extraneous chars
+                    PressAnyKey "Refuse to check out head on master: " \
+                                "working directory contains changes"
                 fi
                 ;;
             j)
@@ -2547,14 +2560,11 @@ function CommitView {
                 echo
                 if test "$ptr" == work
                 then
-                    echo "Moving work down beyond a commit is not supported"
-                    read -N 1 -p "Press any key to continue... "
-                    read -t 0.01 || true # flush extraneous chars
+                    PressAnyKey "Moving work down beyond a commit is not " \
+                                "supported"
                 elif ! IsClean
                 then
-                    echo "Unable to move commit down with dirty work"
-                    read -N 1 -p "Press any key to continue... "
-                    read -t 0.01 || true # flush extraneous chars
+                    PressAnyKey "Unable to move commit down with dirty work"
                 elif (( commit_idx + 1 < num_commits ))
                 then
                     local down_idx=$(( commit_idx + 1 ))
@@ -2612,12 +2622,10 @@ function CommitView {
                 echo
                 if test "$ptr" == work
                 then
-                    echo "Moving work up is not supported"
-                    read -N 1 -p "Press any key to continue... "
+                    PressAnyKey "Moving work up is not supported"
                 elif ! IsClean
                 then
-                    echo "Unable to move commit up with dirty work"
-                    read -N 1 -p "Press any key to continue... "
+                    PressAnyKey "Unable to move commit up with dirty work"
                 elif (( commit_idx > 0 ))
                 then
                     local up_idx=$(( commit_idx - 1 ))
@@ -2755,12 +2763,13 @@ function CommitView {
                 then
                     if test "$branch" == master
                     then
-                        echo "Refuse to submit: On 'master' branch"
+                        PressAnyKey "Refuse to submit: On 'master' branch"
                         abort=true
                     fi
                 elif test "$command" == s
                 then
-                    echo "Refuse to submit: working directory contains modifications"
+                    PressAnyKey "Refuse to submit: working directory " \
+                                "contains modifications"
                     abort=true
                 else
                     # i.e. command == S
