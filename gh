@@ -42,10 +42,8 @@ declare CURL_VERIFIED=false
 declare JQ_VERIFIED=false
 
 declare COMMIT_NOP="    "
-declare COMMIT_PTR=">>> "
-declare -r COMMIT_HELP=\
-"(b)ranch, (c)ommit, (d)iff, (f)etch, (h)elp, (H)ead, down/up (j/k), (l)og,"$'\n'\
-"(m)essage, (o)pen, (p)atch, (q)uit, (s/S)ubmit, (u)ncommit, (w)ww: "
+declare COMMIT_PTR="\e[1m>   "
+declare COMMIT_END="\e[0m"
 
 function Usage {
     local arg
@@ -2106,7 +2104,41 @@ function gh_status {
 function PrintCommitStack {
     local base_commit="$1"
     local ptr="$2"
-    local commit_idx="$3"
+    local stash_idx="$3"
+    local commit_idx="$4"
+
+    local out
+    out=$(git stash list --pretty=format:'%H %h %s')
+
+    local -a rstashes=()
+    (( ${#out} == 0 )) || mapfile -t rstashes <<< "$out"
+    local -i num_rstashes="${#rstashes[@]}"
+
+    local -i i=0
+    for ((; i < num_rstashes; i++))
+    do
+        local j=$(( num_rstashes - 1 - i ))
+        local line="${rstashes[$j]}"
+
+        if ! [[ "$line" =~ ^([0-9a-f]+)' '([0-9a-f]+)' '([^:]+)': '(.*)$ ]]
+        then
+            Fail "Badly formatted line from 'git stash list " \
+                 "--pretty=format:'%H %h %s':"$'\n'"$REPLY"
+        fi
+
+        local hash="${BASH_REMATCH[1]}"
+        local abbrev_hash="${BASH_REMATCH[2]}"
+        local message="${BASH_REMATCH[4]}"
+
+        if test "$ptr" == stash && test $stash_idx == $j
+        then
+            echo -e -n "$COMMIT_PTR"
+            echo -n "[stash $j] $message"
+            echo -e "$COMMIT_END"
+        else
+            echo "$COMMIT_NOP[stash $j] $message"
+        fi
+    done
 
     local shortstat
     Stage
@@ -2115,7 +2147,9 @@ function PrintCommitStack {
     local work_commit="[work]$shortstat"
     if test "$ptr" == work
     then
-        echo "$COMMIT_PTR$work_commit"
+        echo -e -n "$COMMIT_PTR"
+        echo -n "$work_commit"
+        echo -e "$COMMIT_END"
     else
         echo "$COMMIT_NOP$work_commit"
     fi
@@ -2139,7 +2173,9 @@ function PrintCommitStack {
         infoline=$(git log --oneline -n 1 "$commit")
         if test "$ptr" == commits && (( commit_idx == idx ))
         then
-            echo "$COMMIT_PTR$infoline"
+            echo -e -n "$COMMIT_PTR"
+            echo -n "$infoline"
+            echo -e "$COMMIT_END"
         else
             echo "$COMMIT_NOP$infoline"
         fi
@@ -2163,6 +2199,7 @@ function PrintCommitStack {
     done
 
     OUTA=("${commits[@]}")
+    OUTA2=("${rstashes[@]}")
 }
 
 function CommitViewHelp {
@@ -2173,7 +2210,7 @@ function CommitViewHelp {
 branch: Create (if on master) or rename current branch.
 EOF
            ;;
-        c) cat <<EOF
+        c|C) cat <<EOF
 commit: Create or update commit based on changes to working directory.
 
 If invoked while pointing to [work], a commit message will be asked for.  If
@@ -2183,6 +2220,9 @@ files are added to the commit.
 
 If invoked while pointing to a commit, the working directory changes are added
 to that commit.
+
+If invoked with 'C', the commit will be made with "git add --patch", i.e. you
+may interactivelly include or exclude individual hunks.
 EOF
            ;;
         d) cat <<EOF
@@ -2231,24 +2271,23 @@ open: Open menu on current working directory (gh menu).
 EOF
            ;;
         p) cat <<EOF
-(p)atch: Create or update commit based on changes to working directory using
-'git add --patch'.  This allows individual hunks to be included or excluded.
-
-If invoked while pointing to [work], a commit message will be asked for.  If
-the current branch is 'master', a new branch will be created and checked out
-with a name based on the commit message.  Then all modified, added, and removed
-files are added to the commit (with --patch).
-
-If invoked while pointing to a commit, the working directory changes are added
-to that commit (with --patch).
+(p)ush: Push (stash) current working directory changes.
+EOF
+           ;;
+        P) cat <<EOF
+(P)op: Pop stash or most recent commit to working directory.
 EOF
            ;;
         q) cat <<EOF
-quit: quit program.
+quit: Quit program.
 EOF
            ;;
         r) cat <<EOF
 refresh: Reprint commit view.
+EOF
+           ;;
+        R) cat <<EOF
+revert: Revert working directory changes or drop stash.
 EOF
            ;;
         s) cat <<EOF
@@ -2257,12 +2296,6 @@ submit: Submit changes to 'origin' and create PR unless it already exists.
 'S' commits any modifications in the working directory before submitting, and
 may create a branch (based on the commit's message) if on master.  And if no PR
 is associated with the branch the PR's title will be the commit's message.
-EOF
-           ;;
-        u) cat <<EOF
-uncommit:  Removes the last commit without modifying any files.
-
-This command pretends the last commit was just made (git commit), and undoes it.
 EOF
            ;;
         w) cat <<EOF
@@ -2320,7 +2353,8 @@ function CommitView {
     local tmpbranch=hakonhall/tmp
 
     local upstream="" base_commit="" number="" url=""
-    local ptr=work # or commits
+    local ptr=work # or stash or commits
+    local -i stash_idx=0
     local -i commit_idx=0
 
     while true
@@ -2367,9 +2401,11 @@ function CommitView {
         fi
         echo "$endpoint:$owner/$repo#$branch"
 
-        PrintCommitStack "$base_commit" "$ptr" "$commit_idx"
+        PrintCommitStack "$base_commit" "$ptr" "$stash_idx" "$commit_idx"
         local -a commits=("${OUTA[@]}")
         local -i num_commits="${#commits[@]}"
+        local -a stashes=("${OUTA2[@]}")
+        local -i num_stashes="${#stashes[@]}"
 
         local commit=""
         if test "$ptr" == commits
@@ -2377,7 +2413,16 @@ function CommitView {
             commit="${commits[$commit_idx]}"
         fi
 
-        read -p "$COMMIT_HELP" -N 1
+        # Flush input buffer
+        read -t 0.01 -s || true
+
+        local con='\e[4m\e[1m'
+        local coff='\e[0m'
+        echo -e -n \
+"${con}b${coff}ranch, ${con}c${coff}ommit, ${con}d${coff}iff, ${con}f${coff}etch, ${con}h${coff}elp, ${con}H${coff}ead, ${con}j${coff} down, ${con}k${coff} up, ${con}l${coff}og, ${con}m${coff}essage, ${con}o${coff}pen, ${con}p${coff}ush,"$'\n'\
+"${con}P${coff}op, ${con}q${coff}uit, ${con}r${coff}efresh, ${con}R${coff}evert, ${con}s${coff}ubmit, ${con}w${coff}ww: "
+
+        read -N 1 -s
         local command="$REPLY"
 
         # Canonicalize
@@ -2426,6 +2471,8 @@ function CommitView {
                  ;;
         esac
 
+        echo -n "$command"
+
         case "$command" in
             b)
                 echo
@@ -2434,14 +2481,14 @@ function CommitView {
                 then
                     if test "$branch" == master
                     then
-                        read -e -p "Branch name: "
+                        read -e -p "branch name: "
                         if test "$REPLY" != ""
                         then
                             branch="$REPLY"
                             git checkout -q -b "$branch" -t "$upstream"
                         fi
                     else
-                        read -e -p "Rename branch to: " -i "$branch"
+                        read -e -p "rename branch to: " -i "$branch"
                         if test "$REPLY" != ""
                         then
                             branch="$REPLY"
@@ -2450,66 +2497,74 @@ function CommitView {
                     fi
                 fi
                 ;;
-            c|p)
+            c|C)
                 echo
                 if ! IsClean
                 then
-                    if test "$ptr" == work
-                    then
-                        Stage
-                        if test "$REPLY" == p
-                        then
-                            git restore --staged .
-                            git add -p
-                        fi
-                        read -e -p "Message: "
-                        local message="$REPLY"
-                        if test "$message" != ""
-                        then
-                            if test "$branch" == master
+                    case "$ptr" in
+                        work)
+                            Stage
+                            if test "$command" == C
                             then
-                                GetBranchName "$message" "$endpoint"
-                                branch="$OUT"
-                                git checkout -q -b "$branch"
-                                git branch -u "$upstream"
+                                git restore --staged .
+                                git add -p
+                            fi
+                            read -e -p "message: "
+                            local message="$REPLY"
+                            if test "$message" != ""
+                            then
+                                if test "$branch" == master
+                                then
+                                    GetBranchName "$message" "$endpoint"
+                                    branch="$OUT"
+                                    git checkout -q -b "$branch"
+                                    git branch -u "$upstream"
+                                fi
+
+                                git commit -q -m "$message"
+                                ptr=commits
+                                commit_idx=0
+                            fi
+                            ;;
+                        commits)
+                            # Add changes in work to commit commit
+                            Stage
+                            if test "$command" == C
+                            then
+                                git restore --staged .
+                                git add -p
                             fi
 
-                            git commit -q -m "$message"
-                            ptr=commits
-                            commit_idx=0
-                        fi
-                    else
-                        # Add changes in work to commit commit
-                        Stage
-                        if test "$REPLY" == p
-                        then
-                            git restore --staged .
-                            git add -p
-                        fi
+                            if ! git commit -q --fixup "$commit"
+                            then
+                                Fail "Failed: git commit --quiet --fixup " \
+                                     "'$commit'"
+                            fi
 
-                        if ! git commit -q --fixup "$commit"
-                        then
-                            Fail "Failed: git commit --quiet --fixup " \
-                                 "'$commit'"
-                        fi
-
-                        if ! GIT_SEQUENCE_EDITOR=true git rebase -i --autosquash
-                        then
-                            Fail "Failed: git rebase --autosquash"
-                        fi
-                    fi
+                            if ! GIT_SEQUENCE_EDITOR=true git rebase -i --autosquash
+                            then
+                                Fail "Failed: git rebase --autosquash"
+                            fi
+                            ;;
+                    esac
                 fi
                 ;;
             d)
                 echo
-                if test "$ptr" == work
-                then
-                    Stage
-                    LESS=SR git diff HEAD
-                else
-                    # Default is LESS=FSRX
-                    LESS=SR git diff "$commit"^ "$commit"
-                fi
+                case "$ptr" in
+                    stash)
+                        LESS=SR git stash show --diff-algorithm=default \
+                            stash@{$stash_idx}
+                        ;;
+                    work)
+                        Stage
+                        LESS=SR git diff HEAD
+                        ;;
+                    commits)
+                        # Default is LESS=FSRX
+                        LESS=SR git diff "$commit"^ "$commit"
+                        ;;
+                esac
                 ;;
             f)
                 echo
@@ -2536,6 +2591,7 @@ function CommitView {
                     git pull -q --rebase
                     upstream=""
                     ptr=work
+                    stash_idx=0
                     commit_idx=0
                 else
                     PressAnyKey "Refuse to check out head on master: " \
@@ -2544,7 +2600,15 @@ function CommitView {
                 ;;
             j)
                 echo
-                if test "$ptr" == work
+                if test "$ptr" == stash
+                then
+                    if (( stash_idx > 0 ))
+                    then
+                        stash_idx+=-1
+                    else
+                        ptr=work
+                    fi
+                elif test "$ptr" == work
                 then
                     if (( num_commits > 0 ))
                     then
@@ -2558,7 +2622,10 @@ function CommitView {
                 ;;
             J)
                 echo
-                if test "$ptr" == work
+                if test "$ptr" == stash
+                then
+                    PressAnyKey "Moving stash down is not supported"
+                elif test "$ptr" == work
                 then
                     PressAnyKey "Moving work down beyond a commit is not " \
                                 "supported"
@@ -2608,7 +2675,20 @@ function CommitView {
                 ;;
             k)
                 echo
-                if test "$ptr" == commits
+                if test "$ptr" == stash
+                then
+                    if (( stash_idx + 1 < num_stashes ))
+                    then
+                        stash_idx+=1
+                    fi
+                elif test "$ptr" == work
+                then
+                    if (( num_stashes > 0 ))
+                    then
+                        ptr=stash
+                        stash_idx=0
+                    fi
+                elif test "$ptr" == commits
                 then
                     if (( commit_idx > 0 ))
                     then
@@ -2620,7 +2700,10 @@ function CommitView {
                 ;;
             K)
                 echo
-                if test "$ptr" == work
+                if test "$ptr" == stash
+                then
+                    PressAnyKey "Moving stash up is not supported"
+                elif test "$ptr" == work
                 then
                     PressAnyKey "Moving work up is not supported"
                 elif ! IsClean
@@ -2669,7 +2752,10 @@ function CommitView {
                 ;;
             l)
                 echo
-                if test "$ptr" == work
+                if test "$ptr" == stash
+                then
+                    PressAnyKey "Log view of stash is not supported"
+                elif test "$ptr" == work
                 then
                     # '-+X' ensures view is restored when less is quit.
                     # '-R' enables color, '-S' truncates lines.
@@ -2691,7 +2777,7 @@ function CommitView {
                     local current
                     current=$(git log --pretty='format:%s' -n 1 "$commit")
 
-                    read -e -i "$current" -p "Message: "
+                    read -e -i "$current" -p "message: "
                     if test "$REPLY" == ""
                     then
                         echo Message not changed
@@ -2730,9 +2816,53 @@ function CommitView {
                 ;;
             o)
                 echo
-                exec "$0" menu
+                if ! IsClean
+                then
+                    exec "$0" menu
+                fi
                 ;;
-            #p) see c)
+            p)
+                echo
+
+                local -a args=()
+                read -e -p "message: "
+                if test "$REPLY" != ""
+                then
+                    args+=(-m "$REPLY")
+                fi
+
+                git reset -q HEAD
+                git stash push -q -u "${args[@]}"
+                ;;
+            P)
+                echo
+                if test "$ptr" == stash
+                then
+                    # CONFLICT is printed to stdout and cause exit code 1
+                    if git stash pop stash@{$stash_idx}
+                    then
+                        Stage
+
+                        if (( stash_idx > 0 ))
+                        then
+                            stash_idx+=-1
+                        else
+                            ptr=work
+                        fi
+                    fi
+                elif test "$ptr" == commits && (( commit_idx == 0 ))
+                then
+                    git reset --soft HEAD^
+                    Stage
+
+                    # Leave ptr where it is (if possible) to make it easy to pop
+                    # many commits by repeatedly typing (only) P.
+                    if (( num_commits <= 1 ))
+                    then
+                        ptr=work
+                    fi
+                fi
+                ;;
             q)
                 echo
                 break
@@ -2740,6 +2870,28 @@ function CommitView {
             r)
                 echo
                 # Refresh - do nothing then loop around
+                ;;
+            R)
+                echo
+                if test "$ptr" == stash
+                then
+                    git stash drop -q stash@{$stash_idx}
+                    if (( num_stashes == 1 ))
+                    then
+                        ptr=work
+                    elif (( stash_idx < num_stashes - 1 ))
+                    then
+                        : # Keep stash_idx to make it easy to revert many
+                    else
+                        # stash_idx pointed to last stash, need to decrement
+                        stash_idx+=-1
+                    fi
+                elif test "$ptr" == work
+                then
+                    gh_revert
+                else
+                    PressAnyKey "Reverting commit is not supported"
+                fi
                 ;;
             s|S)
                 echo
@@ -2773,7 +2925,7 @@ function CommitView {
                     abort=true
                 else
                     # i.e. command == S
-                    read -e -p "Title: "
+                    read -e -p "title: "
                     if test "$REPLY" == ""
                     then
                         abort=true
@@ -2817,7 +2969,7 @@ function CommitView {
                             url="$OUT2"
                             echo "Created pull request $url"
 
-                            read -e -p "Reviewers: "
+                            read -e -p "reviewers: "
                             local reviewers="$REPLY"
                             if test "$reviewers" != ""
                             then
@@ -2830,15 +2982,6 @@ function CommitView {
                             fi
                         fi
                     fi
-                fi
-                ;;
-            u)
-                echo
-                if test "$ptr" == commits && (( commit_idx == 0 ))
-                then
-                    git reset --soft HEAD^
-                    Stage
-                    ptr=work
                 fi
                 ;;
             w)
