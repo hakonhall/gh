@@ -2593,6 +2593,8 @@ function CommitView {
                     ptr=work
                     stash_idx=0
                     commit_idx=0
+                    number=""
+                    url=""
                 else
                     PressAnyKey "Refuse to check out head on master: " \
                                 "working directory contains changes"
