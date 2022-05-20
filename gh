@@ -1771,6 +1771,15 @@ function PullRequestInfo {
 }
 
 function gh_pr {
+
+    local open=false
+
+    if test "$1" == -o
+    then
+        open=true
+        shift
+    fi
+
     GitHubInfoFromOrigin
     local endpoint="$OUT"
     local owner="$OUT2"
@@ -1787,7 +1796,13 @@ function gh_pr {
     local number="$OUT"
     local url="$OUT2"
 
-    printf "%s\n" "$url"
+    if $open
+    then
+        google-chrome "$url"
+    else
+        printf "%s\n" "$url"
+    fi
+
 }
 
 function gh_resolve_pr {
@@ -2023,6 +2038,7 @@ function ParseStackElementId {
 
 function gh_stack_diff {
     ParseStackElementId "$@"
+    # TODO: In git >= 2.32, -u also shows untracked files
     RunOrFail git stash show -u "${OUTA[@]}"
 }
 
@@ -2045,6 +2061,7 @@ function gh_stack_showall {
         echo "$i: # Stack element ID"
         # Apparently, untracked files are stored in stash@{0}^3,
         # but without untracked files there is no such commit.
+        # TODO: In git >= 2.32, -u also shows untracked files
         echo "Warning: untracked files are not shown"
         git stash show "$i"
     done
@@ -2093,6 +2110,7 @@ function gh_stack_push {
 
 function gh_stack_show {
     ParseStackElementId "$@"
+    # TODO: In git >= 2.32, -u also shows untracked files
     RunOrFail git stash show "${OUTA[@]}"
 }
 
@@ -2198,6 +2216,7 @@ function PrintCommitStack {
         commit="${parents[0]}"
     done
 
+    OUT="$shortstat"
     OUTA=("${commits[@]}")
     OUTA2=("${rstashes[@]}")
 }
@@ -2242,20 +2261,16 @@ EOF
 head: Check out master and pull.
 EOF
            ;;
-        j) cat <<EOF
-down: Move cursor down.
+        j|J) cat <<EOF
+down (j): Move cursor down.  With 'J' pop the current stash to working, or swap
+the current commit with the next.
 EOF
             ;;
-        J) cat <<EOF
-down-swap:  Swap the current commit with the next.
-EOF
-            ;;
-        k) cat <<EOF
+        k|K) cat <<EOF
 up: Move cursor up.
-EOF
-            ;;
-        K) cat <<EOF
-up-swap: Swap the current commit with the previous.
+
+If invoked with 'K', then swap the current commit up.  'K' with the most recent
+(top-most) commit is uncommitted and put in working directory.
 EOF
            ;;
         l) cat <<EOF
@@ -2270,12 +2285,11 @@ EOF
 open: Open menu on current working directory (gh menu).
 EOF
            ;;
-        p) cat <<EOF
+        p|P) cat <<EOF
 (p)ush: Push (stash) current working directory changes.
-EOF
-           ;;
-        P) cat <<EOF
-(P)op: Pop stash or most recent commit to working directory.
+
+If invoked with 'P' the stash will be made with '--patch', i.e. you can choose
+which hunks to include.
 EOF
            ;;
         q) cat <<EOF
@@ -2286,16 +2300,16 @@ EOF
 refresh: Reprint commit view.
 EOF
            ;;
-        R) cat <<EOF
-revert: Revert working directory changes or drop stash.
-EOF
-           ;;
         s) cat <<EOF
 submit: Submit changes to 'origin' and create PR unless it already exists.
 
 'S' commits any modifications in the working directory before submitting, and
 may create a branch (based on the commit's message) if on master.  And if no PR
 is associated with the branch the PR's title will be the commit's message.
+EOF
+           ;;
+        V) cat <<EOF
+revert: Revert working directory changes or drop stash.
 EOF
            ;;
         w) cat <<EOF
@@ -2336,12 +2350,8 @@ function PressAnyKey {
 # TODO: Start out on a working branch. e.g. 1/hv/vespa =>
 #       hakonhall/1-hv-vespa or hakonhall/1-github-vespa--engine-vespa or
 #       "1" or hakonhall/1 or tmp or work or hakonhall/tmp.
-# TODO: Also view stash over worktree
-# TODO: Allow open of of editor when submitting
+# TODO: Allow open of editor when submitting
 function CommitView {
-
-    GetBranch
-    local branch="$OUT"
 
     GitHubInfoFromOrigin
     local endpoint="$OUT"
@@ -2359,6 +2369,9 @@ function CommitView {
 
     while true
     do
+        GetBranch
+        local branch="$OUT"
+
         if test "$upstream" == ""
         then
             base_commit=""
@@ -2402,6 +2415,7 @@ function CommitView {
         echo "$endpoint:$owner/$repo#$branch"
 
         PrintCommitStack "$base_commit" "$ptr" "$stash_idx" "$commit_idx"
+        local shortstat="$OUT"
         local -a commits=("${OUTA[@]}")
         local -i num_commits="${#commits[@]}"
         local -a stashes=("${OUTA2[@]}")
@@ -2419,8 +2433,7 @@ function CommitView {
         local con='\e[4m\e[1m'
         local coff='\e[0m'
         echo -e -n \
-"${con}b${coff}ranch, ${con}c${coff}ommit, ${con}d${coff}iff, ${con}f${coff}etch, ${con}h${coff}elp, ${con}H${coff}ead, ${con}j${coff} down, ${con}k${coff} up, ${con}l${coff}og, ${con}m${coff}essage, ${con}o${coff}pen, ${con}p${coff}ush,"$'\n'\
-"${con}P${coff}op, ${con}q${coff}uit, ${con}r${coff}efresh, ${con}R${coff}evert, ${con}s${coff}ubmit, ${con}w${coff}ww: "
+"${con}b${coff}ranch, ${con}c${coff}ommit, ${con}d${coff}iff, ${con}f${coff}etch, ${con}h${coff}elp, ${con}H${coff}ead, ${con}j${coff} down, ${con}k${coff} up, ${con}l${coff}og, ${con}m${coff}essage, ${con}o${coff}pen, ${con}p${coff}ush, ${con}q${coff}uit, ${con}r${coff}efresh, re${con}V${coff}ert, ${con}s${coff}ubmit, ${con}w${coff}ww: "
 
         read -N 1 -s
         local command="$REPLY"
@@ -2553,6 +2566,8 @@ function CommitView {
                 echo
                 case "$ptr" in
                     stash)
+                        # TODO: In git >= 2.32, -u also shows untracked files
+                        git show stash@{$stash_idx}^3 || true
                         LESS=SR git stash show --diff-algorithm=default \
                             stash@{$stash_idx}
                         ;;
@@ -2626,7 +2641,18 @@ function CommitView {
                 echo
                 if test "$ptr" == stash
                 then
-                    PressAnyKey "Moving stash down is not supported"
+                    # CONFLICT is printed to stdout and cause exit code 1
+                    if git stash pop stash@{$stash_idx}
+                    then
+                        Stage
+
+                        if (( stash_idx > 0 ))
+                        then
+                            stash_idx+=-1
+                        else
+                            ptr=work
+                        fi
+                    fi
                 elif test "$ptr" == work
                 then
                     PressAnyKey "Moving work down beyond a commit is not " \
@@ -2707,12 +2733,33 @@ function CommitView {
                     PressAnyKey "Moving stash up is not supported"
                 elif test "$ptr" == work
                 then
-                    PressAnyKey "Moving work up is not supported"
+                    # This is the same as a p command (and different than P).
+                    if IsClean
+                    then
+                        echo "Nothing to push"
+                    else
+                        read -e -p "message: " -i "$shortstat"
+                        if test "$REPLY" != ""
+                        then
+                            git reset -q HEAD
+                            git stash push -q -u -m "$REPLY"
+                        fi
+                    fi
                 elif ! IsClean
                 then
                     PressAnyKey "Unable to move commit up with dirty work"
-                elif (( commit_idx > 0 ))
+                elif (( commit_idx == 0 ))
                 then
+                    git reset --soft HEAD^
+                    Stage
+
+                    # Leave ptr where it is (if possible) to make it easy to pop
+                    # many commits by repeatedly typing (only) P.
+                    if (( num_commits <= 1 ))
+                    then
+                        ptr=work
+                    fi
+                else # i.e. ptr==commit and commit_idx > 0
                     local up_idx=$(( commit_idx - 1 ))
                     local up_commit="${commits[$up_idx]}"
 
@@ -2814,6 +2861,11 @@ function CommitView {
                             git stash pop -q
                         fi
                     fi
+                elif test "$ptr" == work
+                then
+                    echo "Cannot name changes working directory"
+                else
+                    echo "Cannot rename stash entries"
                 fi
                 ;;
             o)
@@ -2823,45 +2875,26 @@ function CommitView {
                     exec "$0" menu
                 fi
                 ;;
-            p)
+            p|P)
                 echo
-
-                local -a args=()
-                read -e -p "message: "
-                if test "$REPLY" != ""
+                if IsClean
                 then
-                    args+=(-m "$REPLY")
-                fi
-
-                git reset -q HEAD
-                git stash push -q -u "${args[@]}"
-                ;;
-            P)
-                echo
-                if test "$ptr" == stash
-                then
-                    # CONFLICT is printed to stdout and cause exit code 1
-                    if git stash pop stash@{$stash_idx}
+                    echo "Nothing to push"
+                else
+                    read -e -p "message: " -i "$shortstat"
+                    if test "$REPLY" != ""
                     then
-                        Stage
-
-                        if (( stash_idx > 0 ))
+                        git reset -q HEAD
+                        if test "$command" == P
                         then
-                            stash_idx+=-1
+                            # Unfortunately this doesn't allow -u, and untracked
+                            # files will not be included :-( TODO: Add another
+                            # step that lets the user pick added files, then add
+                            # them to the commit git stash push just made.
+                            git stash push -q --patch -m "$REPLY"
                         else
-                            ptr=work
+                            git stash push -q -u -m "$REPLY"
                         fi
-                    fi
-                elif test "$ptr" == commits && (( commit_idx == 0 ))
-                then
-                    git reset --soft HEAD^
-                    Stage
-
-                    # Leave ptr where it is (if possible) to make it easy to pop
-                    # many commits by repeatedly typing (only) P.
-                    if (( num_commits <= 1 ))
-                    then
-                        ptr=work
                     fi
                 fi
                 ;;
@@ -2872,28 +2905,6 @@ function CommitView {
             r)
                 echo
                 # Refresh - do nothing then loop around
-                ;;
-            R)
-                echo
-                if test "$ptr" == stash
-                then
-                    git stash drop -q stash@{$stash_idx}
-                    if (( num_stashes == 1 ))
-                    then
-                        ptr=work
-                    elif (( stash_idx < num_stashes - 1 ))
-                    then
-                        : # Keep stash_idx to make it easy to revert many
-                    else
-                        # stash_idx pointed to last stash, need to decrement
-                        stash_idx+=-1
-                    fi
-                elif test "$ptr" == work
-                then
-                    gh_revert
-                else
-                    PressAnyKey "Reverting commit is not supported"
-                fi
                 ;;
             s|S)
                 echo
@@ -2984,6 +2995,28 @@ function CommitView {
                             fi
                         fi
                     fi
+                fi
+                ;;
+            V)
+                echo
+                if test "$ptr" == stash
+                then
+                    git stash drop -q stash@{$stash_idx}
+                    if (( num_stashes == 1 ))
+                    then
+                        ptr=work
+                    elif (( stash_idx < num_stashes - 1 ))
+                    then
+                        : # Keep stash_idx to make it easy to revert many
+                    else
+                        # stash_idx pointed to last stash, need to decrement
+                        stash_idx+=-1
+                    fi
+                elif test "$ptr" == work
+                then
+                    gh_revert
+                else
+                    PressAnyKey "Reverting commit is not supported"
                 fi
                 ;;
             w)
