@@ -2433,7 +2433,7 @@ function CommitView {
         local con='\e[4m\e[1m'
         local coff='\e[0m'
         echo -e -n \
-"${con}b${coff}ranch, ${con}c${coff}ommit, ${con}d${coff}iff, ${con}f${coff}etch, ${con}h${coff}elp, ${con}H${coff}ead, ${con}j${coff} down, ${con}k${coff} up, ${con}l${coff}og, ${con}m${coff}essage, ${con}o${coff}pen, ${con}p${coff}ush, ${con}q${coff}uit, ${con}r${coff}efresh, re${con}V${coff}ert, ${con}s${coff}ubmit, ${con}w${coff}ww: "
+"${con}b${coff}ranch, ${con}c${coff}ommit, ${con}d${coff}iff, ${con}f${coff}etch, ${con}h${coff}elp, ${con}H${coff}ead, ${con}j${coff} down, ${con}k${coff} up, ${con}l${coff}og, ${con}m${coff}essage, ${con}M${coff}erge, ${con}o${coff}pen, ${con}p${coff}ush, ${con}q${coff}uit, ${con}r${coff}efresh, re${con}V${coff}ert, ${con}s${coff}ubmit, ${con}w${coff}ww: "
 
         read -N 1 -s
         local command="$REPLY"
@@ -2866,6 +2866,13 @@ function CommitView {
                     echo "Cannot name changes working directory"
                 else
                     echo "Cannot rename stash entries"
+                fi
+                ;;
+            M)
+                echo
+                if test "$ptr" == work
+                then
+                    gh_wait --merge
                 fi
                 ;;
             o)
