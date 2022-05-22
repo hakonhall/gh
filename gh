@@ -2872,7 +2872,13 @@ function CommitView {
                 echo
                 if test "$ptr" == work
                 then
-                    gh_wait --merge
+                    if IsClean
+                    then
+                        upstream=""  # Will be update on next iteration
+                        gh_wait --merge
+                    else
+                        echo "Refuse to wait & merge: there are local changes"
+                    fi
                 fi
                 ;;
             o)
