@@ -2281,6 +2281,10 @@ EOF
 message: Change the message of the commit.
 EOF
            ;;
+        M) cat <<EOF
+merge: Wait until all checks pass, then merge, and checkout master.
+EOF
+           ;;
         o) cat <<EOF
 open: Open menu on current working directory (gh menu).
 EOF
