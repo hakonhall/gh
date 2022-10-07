@@ -67,7 +67,8 @@ COMMANDS
       Display available commands
   diff [-m] [OPT...]
       Diff HEAD with working directory, passing OPT to git diff. -m will diff
-      against merge base (last common ancestor to origin/master and HEAD).
+      against merge base (last common ancestor to merge fetch head on origin
+      and HEAD).
   edit
       Open all modified and added files in an editor (EDITOR must be set).
   help [config]
@@ -91,7 +92,7 @@ COMMANDS
        --approve|-A|+1, approve PR
        --assignee|-a ASSIGNEE, assign PR to ASSIGNEE
        --comment|-c COMMENT, add comment
-       --merge|-m, merge pull request, delete branch, and check out master
+       --merge|-m, merge PR, delete branch, and check out merge fetch head
        --ptal|-p, ask reviewers and assignees to take another look at the PR
        --reviewers|-r REVIEWERS, comma-separated list of reviewers
 EOF
@@ -1614,6 +1615,33 @@ repo.
 EOF
 }
 
+function GetMergeFetchHead {
+    if ! test -r .git/FETCH_HEAD
+    then
+        Fail "No such file: .git/FETCH_HEAD"
+    fi
+
+    local branch=""
+    while read -r
+    do
+        if [[ "$REPLY" =~ ^[0-9a-f]{40}$'\t\t'"branch '"([^\']+) ]]
+        then
+            if (( ${#branch} > 0 ))
+            then
+                Fail "More than one merge fetch head"
+            fi
+            branch="${BASH_REMATCH[1]}"
+        fi
+    done < .git/FETCH_HEAD
+
+    if (( ${#branch} == 0 ))
+    then
+        Fail "Failed to find merge fetch head in .git/FETCH_HEAD"
+    fi
+
+    OUT="$branch"
+}
+
 function GetBranch {
     if ! OUT=$(git rev-parse --abbrev-ref HEAD)
     then
@@ -2226,16 +2254,16 @@ function CommitViewHelp {
     echo
     case "$REPLY" in
         b) cat <<EOF
-branch: Create (if on master) or rename current branch.
+branch: Create (if on merge fetch head branch) or rename current branch.
 EOF
            ;;
         c|C) cat <<EOF
 commit: Create or update commit based on changes to working directory.
 
-If invoked while pointing to [work], a commit message will be asked for.  If
-the current branch is 'master', a new branch will be created and checked out
-with a name based on the commit message.  Then all modified, added, and removed
-files are added to the commit.
+If invoked while pointing to [work], a commit message will be asked for.  If the
+current branch is the merge fetch head branch, a new branch will be created and
+checked out with a name based on the commit message.  Then all modified, added,
+and removed files are added to the commit.
 
 If invoked while pointing to a commit, the working directory changes are added
 to that commit.
@@ -2258,7 +2286,7 @@ help: This help.
 EOF
            ;;
         H) cat <<EOF
-head: Check out master and pull.
+head: Check out merge fetch head branch and pull.
 EOF
            ;;
         j|J) cat <<EOF
@@ -2282,7 +2310,8 @@ message: Change the message of the commit.
 EOF
            ;;
         M) cat <<EOF
-merge: Wait until all checks pass, then merge, and checkout master.
+merge: Wait until all checks pass, then merge, and checkout merge fetch head 
+branch.
 EOF
            ;;
         o) cat <<EOF
@@ -2308,8 +2337,9 @@ EOF
 submit: Submit changes to 'origin' and create PR unless it already exists.
 
 'S' commits any modifications in the working directory before submitting, and
-may create a branch (based on the commit's message) if on master.  And if no PR
-is associated with the branch the PR's title will be the commit's message.
+may create a branch (based on the commit's message) if on merge fetch head
+branch.  And if no PR is associated with the branch the PR's title will be the
+commit's message.
 EOF
            ;;
         V) cat <<EOF
@@ -2376,6 +2406,9 @@ function CommitView {
         GetBranch
         local branch="$OUT"
 
+        GetMergeFetchHead
+        local master="$OUT"
+
         if test "$upstream" == ""
         then
             base_commit=""
@@ -2395,8 +2428,8 @@ function CommitView {
             # TODO: This piece of code means this method requires net access to
             # remote!
             if test "$number" == "" &&
-               test "$upstream" != origin/master && \
-               test "$upstream" != master && \
+               test "$upstream" != origin/"$master" && \
+               test "$upstream" != "$master" && \
                GetPullRequestNumber "$endpoint" "$owner" "$repo" \
                                          "$branch"
             then
@@ -2493,10 +2526,10 @@ function CommitView {
         case "$command" in
             b)
                 echo
-                if test "$upstream" == origin/master || \
-                   test "$upstream" == master
+                if test "$upstream" == origin/"$master" || \
+                   test "$upstream" == "$master"
                 then
-                    if test "$branch" == master
+                    if test "$branch" == "$master"
                     then
                         read -e -p "branch name: "
                         if test "$REPLY" != ""
@@ -2530,7 +2563,7 @@ function CommitView {
                             local message="$REPLY"
                             if test "$message" != ""
                             then
-                                if test "$branch" == master
+                                if test "$branch" == "$master"
                                 then
                                     GetBranchName "$message" "$endpoint"
                                     branch="$OUT"
@@ -2606,7 +2639,7 @@ function CommitView {
                 echo
                 if IsClean
                 then
-                    git checkout -q master
+                    git checkout -q "$master"
                     git pull -q --rebase
                     upstream=""
                     ptr=work
@@ -2615,7 +2648,7 @@ function CommitView {
                     number=""
                     url=""
                 else
-                    PressAnyKey "Refuse to check out head on master: " \
+                    PressAnyKey "Refuse to check out head on $master: " \
                                 "working directory contains changes"
                 fi
                 ;;
@@ -2935,17 +2968,17 @@ function CommitView {
                 # and (2) approvers check, add  reviewers, wait until all checks
                 # pass, merge.
                 #
-                # WARNING:  upstream may  be  origin/master  before first  push.
+                # WARNING:  upstream may  be  origin/$master  before first  push
                 # WARNING: push explicitly to orign  and branch name, and ensure
-                # branch name isn't master.
+                # branch name isn't $master.
 
                 local abort=false
                 local message=""
                 if IsClean
                 then
-                    if test "$branch" == master
+                    if test "$branch" == "$master"
                     then
-                        PressAnyKey "Refuse to submit: On 'master' branch"
+                        PressAnyKey "Refuse to submit: On '$master' branch"
                         abort=true
                     fi
                 elif test "$command" == s
@@ -2961,7 +2994,7 @@ function CommitView {
                         abort=true
                     else
                         message="$REPLY"
-                        if test "$branch" == master
+                        if test "$branch" == "$master"
                         then
                             GetBranchName "$message" "$endpoint"
                             branch="$OUT"
@@ -3085,9 +3118,12 @@ function gh_submit {
     GetBranch
     local branch="$OUT"
 
-    if test "$branch" == master
+    GetMergeFetchHead
+    local master="$OUT"
+
+    if test "$branch" == "$master"
     then
-        UsageError submit "Cannot submit master branch"
+        UsageError submit "Cannot submit $master branch"
     fi
 
     GitHubInfoFromOrigin
@@ -3246,16 +3282,15 @@ query {
 }
 
 function RawCreatePullRequest {
-    local destination="$1"
-    local owner="$2"
-    local repo="$3"
-    ToJsonString "$4"
+    local owner="$1"
+    local repo="$2"
+    ToJsonString "$3"
     local branch_to_review="$OUT"
-    ToJsonString "$5"
+    ToJsonString "$4"
     local merge_branch="$OUT"
-    ToJsonString "$6"
+    ToJsonString "$5"
     local title="$OUT"
-    ToJsonString "$7"
+    ToJsonString "$6"
     local body="$OUT"
 
     local data="{
@@ -3285,13 +3320,15 @@ function CreatePullRequest {
     local branch="$4"
     local title="$5"  # Optional
 
-    local destination_branch="master"
+    GetMergeFetchHead
+    local master="$OUT"
 
     local body=
     if test "$title" == ""
     then
-        # TODO: If more than 1 commit ahead of origin/master, we should open an
-        # editor to specify title and body.
+        # TODO: If more than 1 commit ahead of merge fetch head on origin
+        # (e.g. origin/master), we should open an editor to specify title and
+        # body.
 
         title=$(git log -1 --format=%s HEAD)
 
@@ -3302,8 +3339,8 @@ function CreatePullRequest {
         fi
     fi
 
-    RawCreatePullRequest "$destination" "$owner" "$repo" "$branch" \
-                         "$destination_branch" "$title" "$body"
+    RawCreatePullRequest "$owner" "$repo" "$branch" \
+                         "$master" "$title" "$body"
     # Pass through output variables
 }
 
@@ -3426,11 +3463,14 @@ function gh_checkin {
     GetBranch
     local branch="$OUT"
 
-    if test "$branch" == master
+    GetMergeFetchHead
+    local master="$OUT"
+
+    if test "$branch" == "$master"
     then
         if IsClean
         then
-            Fail "On master branch, and there's nothing to commit"
+            Fail "On $master branch, and there's nothing to commit"
         fi
         known_to_be_dirty=true
 
@@ -3765,6 +3805,9 @@ function gh_update {
 function gh_diff {
     Stage
 
+    GetMergeFetchHead
+    local master="$OUT"
+
     if [[ -t 1 && ( -v DISPLAY || $MACHTYPE =~ -apple-darwin ) ]] &&
            diffuse -h 2> /dev/null | grep -q -- --modified-since &&
            false # diffuse fails to import gtk on my machine, but -h still works
@@ -3775,7 +3818,7 @@ function gh_diff {
         do
             case "$1" in
                 -m|--merge-base)
-                    modified_since=$(git merge-base origin/master HEAD)
+                    modified_since=$(git merge-base origin/"$master" HEAD)
                     ;;
                 -c|--commit)
                     modified_since="$2"
@@ -3806,7 +3849,7 @@ function gh_diff {
     if test "$1" == -m || test "$1" == --merge-base
     then
         shift
-        local merge_base=$(git merge-base origin/master HEAD)
+        local merge_base=$(git merge-base origin/"$master" HEAD)
         branches+=("$merge_base")
     else
         branches+=(HEAD)
@@ -3815,7 +3858,10 @@ function gh_diff {
 }
 
 function gh_head {
-    gh_checkout master
+    GetMergeFetchHead
+    local master="$OUT"
+
+    gh_checkout "$master"
     gh_update
 }
 
@@ -3910,14 +3956,17 @@ function TryGetPullRequest {
         *) Fail "Pull request in bad state '$state'" ;;
     esac
 
+    GetMergeFetchHead
+    local master="$OUT"
+
     JqRaw ".headRef.name" "$json"
     local branch="$OUT"
     if ! [[ "$branch" =~ ^[a-zA-Z0-9_/.-]+$ ]]
     then
         Fail "Unexpected name of branch: '$branch'"
-    elif test "$branch" == master
+    elif test "$branch" == "$master"
     then
-        Fail "Pull request bound to master, refusing to proceed"
+        Fail "Pull request bound to $master, refusing to proceed"
     fi
 
     JqRaw ".headRef.target.oid" "$json"
@@ -4215,7 +4264,7 @@ function CheckStatus {
     case "$mergeable" in
         MERGEABLE) : ;;
         CONFLICTING)
-            Fail "Pull requests is conflicting with origin/master"
+            Fail "Pull requests is conflicting with remote branch"
             ;;
         null|UNKNOWN)
             OUT="Checking for ability to automatically merge"
@@ -4623,17 +4672,20 @@ function WaitForChecksThen {
 
         if test "$wd_branch" == "$branch"
         then
-            if ! git checkout --quiet master
+            GetMergeFetchHead
+            local master="$OUT"
+
+            if ! git checkout --quiet "$master"
             then
-                Fail "Failed to check out master"
+                Fail "Failed to check out $master"
             fi
 
             if ! git pull --quiet --rebase
             then
-                Fail "Failed to pull master"
+                Fail "Failed to pull $master"
             fi
 
-            echo "master checked out and updated"
+            echo "$master checked out and updated"
 
             # The following git command may output the following warning, if
             # the repo has been set up to a merge method other than 'merge':
@@ -4890,7 +4942,7 @@ Options are applied if and after the checks pass:
   --approve|-A|+1       Approve PR
   --assignee|-a USER    Assign PR to USER
   --comment|-c COMMENT  Add comment
-  --merge|-m            Merge pull request, delete branch, and check out master
+  --merge|-m            Merge PR, delete branch, and check out merge fetch head
   --ptal|-p             Ask reviewers and assignees to take another look
   --reviewers|-r USERS  Comma-separated list of reviewers
 EOF
