@@ -26,7 +26,8 @@ declare -A COMMANDS=(
     [h]=gh_help
     [help]=gh_help
     [refresh]=gh_refresh
-    [wait]=gh_wait)
+    [wait]=gh_wait
+    [www]=gh_www)
 
 declare ECHO_COMMAND=false
 
@@ -95,6 +96,8 @@ COMMANDS
        --merge|-m, merge PR, delete branch, and check out merge fetch head
        --ptal|-p, ask reviewers and assignees to take another look at the PR
        --reviewers|-r REVIEWERS, comma-separated list of reviewers
+  www
+      Open the PR associated with the current branch in google-chrome.
 EOF
 
     exit 1
@@ -3091,6 +3094,26 @@ function gh_view {
     CommitView
 }
 
+function gh_www {
+    GitHubInfoFromOrigin
+    local endpoint="$OUT"
+    local owner="$OUT2"
+    local repo="$OUT3"
+    local ssh_url="$OUT4"
+
+    GetBranch
+    local branch="$OUT"
+
+    if ! GetPullRequestNumber "$endpoint" "$owner" "$repo" "$branch"
+    then
+        Fail "There is no PR associated with the current branch"
+    fi
+    local number="$OUT"
+    local url="$OUT2"
+
+    google-chrome "$url"
+}
+
 function gh_submit {
     local wait=true open_chrome=true
     while (( $# > 0 ))
@@ -5052,8 +5075,6 @@ declare -A UNOFFICIAL_COMMANDS=(
     [pending]=gh_pending
     [pop]=gh_stack_pop
     [pr]=gh_pr
-    [pub]=gh_submit
-    [publish]=gh_submit
     [push]=gh_stack_push
     [repo]=gh_repo
     [resolve-pr]=gh_resolve_pr
