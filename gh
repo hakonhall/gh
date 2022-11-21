@@ -1618,31 +1618,25 @@ repo.
 EOF
 }
 
-function GetMergeFetchHead {
-    if ! test -r .git/FETCH_HEAD
-    then
-        Fail "No such file: .git/FETCH_HEAD"
+function GetOriginHead {
+    GetGitRootRelative
+    local root="$OUT"
+
+    local headfile="$root"/.git/refs/remotes/origin/HEAD
+    if ! test -f "$headfile"; then
+        Fail "Unable to resolve origin's HEAD branch: No such file: $headfile"
     fi
 
-    local branch=""
-    while read -r
-    do
-        if [[ "$REPLY" =~ ^[0-9a-f]{40}$'\t\t'"branch '"([^\']+) ]]
-        then
-            if (( ${#branch} > 0 ))
-            then
-                Fail "More than one merge fetch head"
-            fi
-            branch="${BASH_REMATCH[1]}"
-        fi
-    done < .git/FETCH_HEAD
-
-    if (( ${#branch} == 0 ))
-    then
-        Fail "Failed to find merge fetch head in .git/FETCH_HEAD"
+    local head
+    if ! head=$(< "$headfile"); then
+        Fail "Failed to read '$headfile'"
     fi
 
-    OUT="$branch"
+    if ! [[ "$head" =~ ^'ref: refs/remotes/origin/'(.*)$ ]]; then
+        Fail "Unexpected content of '$headfile': $head"
+    fi
+
+    OUT="${BASH_REMATCH[1]}"
 }
 
 function GetBranch {
@@ -2409,7 +2403,7 @@ function CommitView {
         GetBranch
         local branch="$OUT"
 
-        GetMergeFetchHead
+        GetOriginHead
         local master="$OUT"
 
         if test "$upstream" == ""
@@ -3141,7 +3135,7 @@ function gh_submit {
     GetBranch
     local branch="$OUT"
 
-    GetMergeFetchHead
+    GetOriginHead
     local master="$OUT"
 
     if test "$branch" == "$master"
@@ -3343,7 +3337,7 @@ function CreatePullRequest {
     local branch="$4"
     local title="$5"  # Optional
 
-    GetMergeFetchHead
+    GetOriginHead
     local master="$OUT"
 
     local body=
@@ -3486,7 +3480,7 @@ function gh_checkin {
     GetBranch
     local branch="$OUT"
 
-    GetMergeFetchHead
+    GetOriginHead
     local master="$OUT"
 
     if test "$branch" == "$master"
@@ -3828,7 +3822,7 @@ function gh_update {
 function gh_diff {
     Stage
 
-    GetMergeFetchHead
+    GetOriginHead
     local master="$OUT"
 
     if [[ -t 1 && ( -v DISPLAY || $MACHTYPE =~ -apple-darwin ) ]] &&
@@ -3881,7 +3875,7 @@ function gh_diff {
 }
 
 function gh_head {
-    GetMergeFetchHead
+    GetOriginHead
     local master="$OUT"
 
     gh_checkout "$master"
@@ -3979,7 +3973,7 @@ function TryGetPullRequest {
         *) Fail "Pull request in bad state '$state'" ;;
     esac
 
-    GetMergeFetchHead
+    GetOriginHead
     local master="$OUT"
 
     JqRaw ".headRef.name" "$json"
@@ -4695,7 +4689,7 @@ function WaitForChecksThen {
 
         if test "$wd_branch" == "$branch"
         then
-            GetMergeFetchHead
+            GetOriginHead
             local master="$OUT"
 
             if ! git checkout --quiet "$master"
