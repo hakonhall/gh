@@ -16,6 +16,7 @@ declare -r REPOS_FILE="$CONFIG_ROOT"/.gh-repos
 declare -r OLD_REPOS_FILE="$CONFIG_ROOT"/.gh-repos.old
 
 declare -r DIFF_FILE="$CONFIG_ROOT"/.gh.diff
+declare -r SAVE_DIR="$CONFIG_ROOT"/.gh.save
 
 declare -A COMMANDS=(
     [checkin]=gh_checkin
@@ -77,12 +78,26 @@ COMMANDS
       Apply diff from ~/.gh.diff. If P is specified and refers to a file,
       use that path instead, otherwise assume P is a hostname and scp its
       ~/.gh.diff to localhost.
+  load2 [-d] [-n NAME]
+      Copy files from ~/.gh.save (or ~/.gh.save/NAME).  With -d, make missing
+      directories.  See save2.
+  new TITLE
+      Check out a new branch derived from TITLE.  The current branch must be on
+      origin head branch.  When a PR is eventually made, e.g. with the 'ci'
+      subcommand, its title will be TITLE.  Useful with the 'c' subcommand.
   refresh
       Read $CONFIG_FILE and generate $REPOS_FILE cache.
   save [-n NAME] [PATH...]
       Save diff to ~/.gh.diff, limited to PATH if present.  With -n, the diff is
       saved to the path NAME if it contains a "/", otherwise it is saved to
       ~/.gh.diff.NAME.
+  save2 [-n NAME]
+      Save all modified files below ~/.gh.save (or ~/.gh.save.d/NAME).  Can be
+      reapplied with load2 subcommand.
+  p
+      Pop last stack element onto working.
+  s
+      Push current work onto stack.
   stack
       Stack commands similar to 'git stash', see 'gh help stack' for more info.
   uncommit
@@ -493,6 +508,25 @@ function Curl {
     local url="$1"
     local token="$2"
     shift 2
+
+    local accept_version=.v3
+    local auth=token
+
+    while (( $# > 0 ))
+    do
+        case "$1" in
+            -a)
+                accept_version="$2"
+                shift 2
+                ;;
+            -b)
+                auth=Bearer
+                shift
+                ;;
+            *) break ;;
+        esac
+    done
+
     local -a args=("$@")
 
     if ! $CURL_VERIFIED
@@ -516,7 +550,7 @@ function Curl {
     then
         local accept=application/vnd.github.thor-preview+json
     else
-        local accept=application/vnd.github.v3+json
+        local accept=application/vnd.github${accept_version}+json
     fi
 
     local -a command=(
@@ -527,7 +561,7 @@ function Curl {
         --write-out "%{http_code}"
         -H "Content-Type: application/json"
         -H "Accept: $accept"
-        -H "Authorization: token $token"
+        -H "Authorization: $auth $token"
         "${args[@]}"
         "$url"
     )
@@ -678,16 +712,61 @@ function QueryGraphList {
     OUT="$jq_nodes"
 }
 
-function GetOrgs {
+function gh_resolve_endpoint {
+    if (( $# != 1 ))
+    then
+        UsageError resolve-endpoint \
+                   "Expected exactly one argument: the endpoint name"
+    fi
     local endpoint="$1"
 
     ResolveEndpoint "$endpoint"
-    local user="$OUT2"
+    echo "rest_url=$OUT"
+    echo "user=$OUT2"
+    echo "token=$OUT3"
+    echo "graphql_url=$OUT4"
+}
 
-    ToJsonString "$user"
-    local user_json="$OUT"
+function GetOrgs {
+    local endpoint="$1"
 
-    local query="
+    # The getting of organizations associated with an authenticated user.
+    #
+    #   $ gh orgs github
+    #   yahoo
+    #   vespa-engine
+    #   vespa-cloud
+    #
+    # But
+    #
+    #   $ curl -L -H 'Accept: application/vnd.github+json' -H "Authorization: Bearer $GITHUB_TOKEN" -H "X-GitHub-Api-Version: 2022-11-28" https://api.github.com/user/orgs
+    #   ... prints JSON for yahoo, vespa-engine, vespa-cloud, and vespaai
+    #
+    # However trying to access the repositories of vespaai with GITHUB_TOKEN
+    # fails with a permission error saying the personal access token (classic)
+    # cannot be used.
+    #
+    # I have a fine-grained personal access token (VESPAAI_TOKEN), which lists
+    # only vespa-engine with 'gh orgs vespaai' and only vespaai with the curl.
+    #
+    # So with a classic PAT (github endpoint aka GITHUB_TOKEN), 'gh orgs' does
+    # the right thing, but with fine-grained PAT (vespaai endpoint aka
+    # VESPAAI_TOKEN) the curl does the right thing.  :shrug:
+    if test "$endpoint" == vespaai
+    then
+        GetRest "$endpoint" /user/orgs -a "" -b
+        local orgs_json="$OUT"
+
+        JqRawLines ".[].login" "$orgs_json"
+        local -a orgs=("${OUTA[@]}")
+    else
+        ResolveEndpoint "$endpoint"
+        local user="$OUT2"
+
+        ToJsonString "$user"
+        local user_json="$OUT"
+
+        local query="
 query {
   user(login:$user_json) {
     organizations(first:100) {
@@ -706,11 +785,12 @@ query {
 }
 "
 
-    QueryGraph "$endpoint" "$query"
-    local orgs_json="$OUT"
+        QueryGraph "$endpoint" "$query"
+        local orgs_json="$OUT"
 
-    JqRawLines ".data.user.organizations.nodes[].login" "$orgs_json"
-    local -a orgs=("${OUTA[@]}")
+        JqRawLines ".data.user.organizations.nodes[].login" "$orgs_json"
+        local -a orgs=("${OUTA[@]}")
+    fi
 
     OUTA=("${orgs[@]}")
 }
@@ -786,7 +866,7 @@ query {
               "$response_json"
         local end_cursor="$OUT"
 
-        if ! Match '^[a-zA-Z0-9=_]+$' "$end_cursor"
+        if ! Match '^[a-zA-Z0-9=_-]+$' "$end_cursor"
         then
             Fail "Bad endCursor value in response: '$end_cursor'"
         fi
@@ -1189,6 +1269,69 @@ function gh_menu {
     CopyHashTo OUTH2 statuses
 }
 
+# Aliases:  new, new-pr, prepare, prepare-pr
+function gh_new_pr {
+    if (( $# != 1 ))
+    then
+        UsageError new-pr "Expects exactly one argument: The PR title"
+    fi
+    local title="$1"
+
+    GetBranch
+    local current_branch="$OUT"
+
+    GetOriginHead
+    local master="$OUT"
+
+    if [ "$current_branch" != "$master" ]; then
+        UsageError new-pr "Current branch not $master: $current_branch"
+    fi
+
+    GitHubInfoFromOrigin
+    local endpoint="$OUT"
+    local owner="$OUT2"
+    local repo="$OUT3"
+
+    GetBranchName "$title" "$endpoint"
+    local branch="$OUT"
+
+    local upstream # typicall ends up as origin/master
+    if upstream=$(git rev-parse --abbrev-ref '@{u}' 2>/dev/null)
+    then
+        :
+    elif (( $? == 128 ))
+    then
+        Fail "No upstream found: Please set an upstream with: " \
+             "git branch -u <upstream>"
+    else
+        Fail "No upstream found: " \
+             "'git rev-parse --abbrev-ref @{u}' failed"
+    fi
+
+    if IsClean
+    then
+        git checkout -q -b "$branch"
+    else
+        # May not be needed?  Needed only with untracked files?
+        Stage
+        git stash save --quiet --include-untracked
+        if ! git checkout --quiet -b "$branch"
+        then
+            echo "Error checking out new branch!"
+            echo "To retrieve your work, issue 'git stash pop'"
+            exit 1
+        fi
+        git stash pop --quiet
+    fi
+
+    git branch -u "$upstream"
+
+    GetGitRootRelative
+    local root="$OUT"
+
+    printf "%s\t%s\n" "$branch" "$title" >> "$root"/.git/gh.titles
+}
+
 function gh_repos {
     if (( $# != 2 ))
     then
@@ -1306,7 +1449,34 @@ function gh_refresh {
     rm "$repos_workfile"
 }
 
+function GetRemoteGitHub {
+    GetRemoteOrDie
+    local branch="$OUT"
+    local remote="$OUT2"
+
+    CaptureStd git remote get-url origin
+    local url="$OUT"
+
+    AssertReposFile
+
+    local endpoint="" owner="" repo="" ssh_url=""
+    while read -r endpoint owner repo ssh_url
+    do
+        if test "$ssh_url" == "$url"
+        then
+            OUT="$endpoint"
+            OUT2="$owner"
+            OUT3="$repo"
+            OUT4="$ssh_url"
+            return
+        fi
+    done < "$REPOS_FILE"
+
+    Fail "Failed to find any repositories matching current git repo"
+}
+
 # TODO: Get remote from: git rev-parse --abbrev-ref @{upstream}
+# TODO: Extend GetRemoteHead
 function GitHubInfoFromOrigin {
     # Unfortunately get-url isn't supported by git on RHEL 7, so we have to
     # extract URL from 'git remote -v'.
@@ -1618,6 +1788,78 @@ repo.
 EOF
 }
 
+function GetRemoteOrDie {
+    GetRemote || Fail "The current branch has no upstream"
+}
+
+# Returns 1 if the current branch does not have an upstream
+function GetRemote {
+    local out
+    if out=$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>&1)
+    then
+        :
+    else
+        local -i code=$?
+        if (( code == 128 ))
+        then
+            return 1
+        else
+            Fail "Failed to get upstream: $out"
+        fi
+    fi
+
+    local remote="${out%%/*}"
+    local branch="${out#*/}"
+
+    if test "$remote/$branch" != "$out"
+    then
+        Fail "Failed to extract remote name and branch from: $out"
+    fi
+
+    OUT="$remote"
+    OUT2="$branch"
+    return 0
+}
+
+function GetRemoteHead {
+    GetRemoteOrDie
+    local remote="$OUT"
+
+    GetGitRootRelative
+    local root="$OUT"
+    local branch="$OUT2"
+
+    local path="$root"/.git/refs/remotes/"$remote"/HEAD
+
+    local content
+    content=$(< "$path")
+    local head
+    head="${content#ref: refs/remotes/$remote/}"
+    if test "$head" == "$content"
+    then
+        Fail "Unexpected content of $path: $content"
+    fi
+
+    OUT="$branch"
+    OUT2="$remote"
+    OUT3="$head"
+}
+
+function gh_remote {
+    GetRemoteHead
+
+    if test "$1" == -v || test "$1" == --verbose
+    then
+        echo "Branch: $OUT"
+        echo "Remote: $OUT2"
+        echo "Remote HEAD: $OUT3"
+    else
+        echo "$OUT $OUT2 $OUT3"
+    fi
+}
+
+# TODO: Replace usage of this with GetRemoteHead.  Consider requiring an
+# upstream in GetRemoteHead to avoid testing for return value.
 function GetOriginHead {
     GetGitRootRelative
     local root="$OUT"
@@ -1699,6 +1941,77 @@ function gh_load {
     else
         Fail "Failed to load $diff_file"
     fi
+}
+
+function gh_load_files {
+    local save_dir="$SAVE_DIR"
+    local make_dirs=false
+
+    while (( $# > 0 ))
+    do
+        case "$1" in
+            -d)
+                make_dirs=true
+                shift
+                ;;
+            -n)
+                if [[ "$2" =~ / ]]
+                then
+                    save_dir="$2"
+                    local parent_dir=$(dirname "$save_dir")
+                    if ! test -d "$parent_dir"
+                    then
+                        Fail "Parent directory of '$save_dir' doesn't exist"
+                    fi
+                else
+                    save_dir="$SAVE_DIR".d/"$2"
+                fi
+                shift 2
+                ;;
+            -*) Fail "Unknown option '$1'" ;;
+            *) break ;;
+        esac
+    done
+
+    save_dir="${save_dir%/}"
+    test -d "$save_dir" || Fail "No such directory: $save_dir"
+
+    find "$save_dir" -type f | while read -r
+    do
+        local path="$REPLY"
+        local relpath="${path#$save_dir}"
+        if test "$relpath" == "$path"
+        then
+            Fail "Invalid prefix of '$path': Expected '$save_dir'"
+        fi
+
+        while test "${relpath:0:1}" == /
+        do
+            relpath="${relpath:1}"
+        done
+
+        if test "$relpath" == "" || ! test -f "$save_dir"/"$relpath"
+        then
+            Fail "Failed to derive the path of '$path' relative to '$save_dir'"
+        fi
+
+        local reldir="${relpath%/*}"
+        if test "$reldir" == "$relpath"
+        then
+            reldir=.
+        fi
+
+        if $make_dirs
+        then
+            RunOrFail mkdir -p "$reldir"
+        elif ! test -d "$reldir"
+        then
+            Fail "Aborting: Directory does not exist: $reldir"
+        fi
+
+        RunOrFail cp "$path" "$relpath"
+        echo "Restored $relpath"
+    done
 }
 
 function PendingUpstreamCommits {
@@ -1796,7 +2109,6 @@ function PullRequestInfo {
 }
 
 function gh_pr {
-
     local open=false
 
     if test "$1" == -o
@@ -1881,7 +2193,7 @@ function gh_resolve_wd {
         UsageError resolve-wd "Too many arguments"
     fi
 
-    GitHubInfoFromOrigin
+    GetRemoteGitHub
     local endpoint="$OUT"
     local owner="$OUT2"
     local repo="$OUT3"
@@ -1999,6 +2311,52 @@ function gh_save {
     Stage
     git diff HEAD "$@" > "$diff_file"
     echo "Saved to $diff_file"
+}
+
+function gh_save2 {
+    local save_dir="$SAVE_DIR"
+    local force=false
+
+    while (( $# > 0 ))
+    do
+        case "$1" in
+            -n)
+                if [[ "$2" =~ / ]]
+                then
+                    save_dir="$2"
+                    local parent_dir=$(dirname "$save_dir")
+                    if ! test -d "$parent_dir"
+                    then
+                        Fail "Parent directory of '$save_dir' doesn't exist"
+                    fi
+                else
+                    save_dir="$SAVE_DIR".d/"$2"
+                    if ! $force && test -d "$save_dir"
+                    then
+                        Fail "'$2' has already been saved: use -f to overwrite"
+                    fi
+                    RunOrFail mkdir -p "$save_dir"
+                fi
+                shift 2
+                ;;
+            -*) Fail "Unknown option '$1'" ;;
+            *) break ;;
+        esac
+    done
+
+    Stage
+    RunOrFail rm -rf "$save_dir"
+    RunOrFail mkdir -p "$save_dir"
+    git diff --name-only HEAD | while read -r
+    do
+        local path="$REPLY"
+        if [ -r "$path" ]; then
+            local dir="${path%/*}"
+            RunOrFail mkdir -p "$save_dir"/"$dir"
+            RunOrFail cp "$path" "$save_dir"/"$path"
+        fi
+    done
+    echo "Saved to $save_dir"
 }
 
 function gh_stack {
@@ -3343,16 +3701,34 @@ function CreatePullRequest {
     local body=
     if test "$title" == ""
     then
-        # TODO: If more than 1 commit ahead of merge fetch head on origin
-        # (e.g. origin/master), we should open an editor to specify title and
-        # body.
+        GetGitRootRelative
+        local root="$OUT"
 
-        title=$(git log -1 --format=%s HEAD)
-
-        body=$(git log -1 --format=%b HEAD)
-        if [[ "$body" =~ ^[' '$'\n'$'\r']+$ ]]
+        if [ -r "$root"/.git/gh.titles ]
         then
-            body=""
+            while read -r
+            do
+                if [[ "$REPLY" =~ ^"$branch"$'\t'(.*) ]]
+                then
+                    title="${BASH_REMATCH[1]}"
+                    break
+                fi
+            done < "$root"/.git/gh.titles
+        fi
+
+        if test "$title" == ""
+        then
+            # TODO: If more than 1 commit ahead of merge fetch head on origin
+            # (e.g. origin/master), we should open an editor to specify title
+            # and body.
+
+            title=$(git log -1 --format=%s HEAD)
+
+            body=$(git log -1 --format=%b HEAD)
+            if [[ "$body" =~ ^[' '$'\n'$'\r']+$ ]]
+            then
+                body=""
+            fi
         fi
     fi
 
@@ -5063,19 +5439,28 @@ declare -A UNOFFICIAL_COMMANDS=(
     [info]=gh_info
     [is-clean]=IsClean
     [load]=gh_load
+    [load2]=gh_load_files
     [ls]=gh_stack_list
     [m]=gh_menu
     [menu]=gh_menu
+    [new-pr]=gh_new_pr
+    [new]=gh_new_pr
     [pending]=gh_pending
+    [prepare]=gh_new_pr
+    [prepare-pr]=gh_new_pr
+    [p]=gh_stack_pop
     [pop]=gh_stack_pop
     [pr]=gh_pr
     [push]=gh_stack_push
+    [remote]=gh_remote
     [repo]=gh_repo
+    [resolve-endpoint]=gh_resolve_endpoint
     [resolve-pr]=gh_resolve_pr
     [resolve-wd]=gh_resolve_wd
     [revert]=gh_revert
-    [s]=gh_stack
+    [s]=gh_stack_push
     [save]=gh_save
+    [save2]=gh_save2
     [sdi]=gh_stack_diff
     [sdiff]=gh_stack_diff
     [stack]=gh_stack
