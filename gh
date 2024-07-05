@@ -36,7 +36,7 @@ declare PREVIEW=false
 
 # Generic global variables to hold input and output from functions
 declare -A INH=()
-declare OUT="" OUT2="" OUT3="" OUT4="" OUT5="" OUT6=""
+declare OUT="" OUT2="" OUT3="" OUT4="" OUT5="" OUT6="" OUT7=""
 declare -a OUTA=() OUTA2=()
 declare -A OUTH=() OUTH2=()
 
@@ -61,8 +61,11 @@ Git and GitHub tool.
 See '$PROGRAM help config' for how to set up config.
 
 COMMANDS
-  checkin|ci [OPTION...] [TITLE]
+  ci|checkin [OPTION...] [TITLE]
       Push local change to pull request and wait. See wait for options.
+  co|checkout [OPTION...] REF
+      Checkout repository as it were at a given date (@YYYY-mm-ddTHH:MM:SSZ),
+      or given by a pulls request number or URL, or a branch/commit.
   clone PATTERN
       Clone ENDPOINT:OWNER/REPO matching PATTERN from $REPOS_FILE.
   commands
@@ -102,6 +105,9 @@ COMMANDS
       Stack commands similar to 'git stash', see 'gh help stack' for more info.
   uncommit
       Undo last commit command, i.e. set HEAD to parent without touching wd.
+  upstream [--fallback]
+      Resolve the upstream, optionally falling back to the single configured
+      remote and its default branch.
   wait [OPTION...] [PR_URL]
       Wait for checks to pass.
       Options are applied if and after the checks pass:
@@ -1274,62 +1280,68 @@ function gh_new_pr {
     if (( $# != 1 ))
     then
         UsageError new-pr "Expects exactly one argument: The PR title"
+    elif (( ${#1} == 0 ))
+    then
+        UsageError new-pr "Title cannot be empty"
     fi
     local title="$1"
 
     GetBranch
     local current_branch="$OUT"
 
-    GetOriginHead
-    local master="$OUT"
+    ResolveUpstream
+    local upstream_remote="$OUT"
+    local upstream_branch="$OUT2"
+    local upstream_head="$OUT3"
+    local ssh_url="$OUT4"
+    local endpoint="$OUT5"
+    local owner="$OUT6"
+    local repo="$OUT7"
 
-    if [ "$current_branch" != "$master" ]; then
-        UsageError new-pr "Current branch not $master: $current_branch"
+    if [ "$current_branch" != "$upstream_head" ]; then
+        UsageError new-pr "Current branch not $upstream_head: $current_branch"
     fi
-
-    GitHubInfoFromOrigin
-    local endpoint="$OUT"
-    local owner="$OUT2"
-    local repo="$OUT3"
 
     GetBranchName "$title" "$endpoint"
-    local branch="$OUT"
-
-    local upstream # typicall ends up as origin/master
-    if upstream=$(git rev-parse --abbrev-ref '@{u}' 2>/dev/null)
-    then
-        :
-    elif (( $? == 128 ))
-    then
-        Fail "No upstream found: Please set an upstream with: " \
-             "git branch -u <upstream>"
-    else
-        Fail "No upstream found: " \
-             "'git rev-parse --abbrev-ref @{u}' failed"
-    fi
+    local new_branch="$OUT"
 
     if IsClean
     then
-        git checkout -q -b "$branch"
+        Run git checkout -q -b "$new_branch"
     else
         # May not be needed?  Needed only with untracked files?
-        Stage
-        git stash save --quiet --include-untracked
-        if ! git checkout --quiet -b "$branch"
+        #Stage
+        #git stash save --quiet --include-untracked
+        Run git stash save -q --include-untracked
+        if ! Run git checkout -b "$new_branch"
         then
             echo "Error checking out new branch!"
             echo "To retrieve your work, issue 'git stash pop'"
             exit 1
         fi
-        git stash pop --quiet
+        Run git stash pop -q
     fi
 
-    git branch -u "$upstream"
+    if test "$upstream_remote" != origin
+    then
+        Fail "Upstream's remote is not origin: '$upstream_remote'"$'\n' \
+             "Please verify and manually run rest of the commands"
+    fi
+
+    Run git push -u "$upstream_remote" "$new_branch"
 
     GetGitRootRelative
     local root="$OUT"
 
-    printf "%s\t%s\n" "$branch" "$title" >> "$root"/.git/gh.titles
+    if test "$root" == .
+    then
+        local titles_file=.git/gh.titles
+    else
+        local titles_file="$root"/.git/gh.titles
+    fi
+
+    printf "%s\t%s\n" "$new_branch" "$title" >> "$titles_file"
+    echo "$titles_file has been updated"
 }
 
 function gh_repos {
@@ -1449,13 +1461,9 @@ function gh_refresh {
     rm "$repos_workfile"
 }
 
-function GetRemoteGitHub {
-    GetRemoteOrDie
-    local branch="$OUT"
-    local remote="$OUT2"
-
-    CaptureStd git remote get-url origin
-    local url="$OUT"
+# Get the repo from repos file (.gh-repos) with the given URL
+function GetRepoFromUrl {
+    local url="$1"
 
     AssertReposFile
 
@@ -1474,36 +1482,6 @@ function GetRemoteGitHub {
 
     Fail "Failed to find any repositories matching current git repo"
 }
-
-# TODO: Get remote from: git rev-parse --abbrev-ref @{upstream}
-# TODO: Extend GetRemoteHead
-function GitHubInfoFromOrigin {
-    # Unfortunately get-url isn't supported by git on RHEL 7, so we have to
-    # extract URL from 'git remote -v'.
-    local remote_url
-    local fetch_url_regex='^origin'$'\t''(.*) \(fetch\)$'
-    if ! remote_url=$(git remote -v | Extract "$fetch_url_regex" "%1")
-    then
-        Fail "Failed to get origin remote URL"
-    fi
-
-    AssertReposFile
-
-    local endpoint="" owner="" repo="" ssh_url=""
-    while read -r endpoint owner repo ssh_url
-    do
-        if test "$ssh_url" == "$remote_url"
-        then
-            OUT="$endpoint"
-            OUT2="$owner"
-            OUT3="$repo"
-            OUT4="$ssh_url"
-            return
-        fi
-    done < "$REPOS_FILE"
-
-    Fail "Failed to find any repositories matching current git repo"
-}            
 
 function gh_rest {
     if (( $# < 2 ))
@@ -1788,14 +1766,10 @@ repo.
 EOF
 }
 
-function GetRemoteOrDie {
-    GetRemote || Fail "The current branch has no upstream"
-}
-
 # Returns 1 if the current branch does not have an upstream
-function GetRemote {
+function GetUpstream {
     local out
-    if out=$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>&1)
+    if out=$(git rev-parse --symbolic-full-name '@{upstream}' 2>&1)
     then
         :
     else
@@ -1808,12 +1782,18 @@ function GetRemote {
         fi
     fi
 
-    local remote="${out%%/*}"
-    local branch="${out#*/}"
-
-    if test "$remote/$branch" != "$out"
+    local suffix="${out#refs/remotes/}"
+    if test "$suffix" == "$out"
     then
-        Fail "Failed to extract remote name and branch from: $out"
+        Fail "Invalid prefix of upstream: $out"
+    fi
+
+    local remote="${suffix%%/*}"
+    local branch="${suffix#*/}"
+
+    if test "$remote/$branch" != "$suffix"
+    then
+        Fail "Failed to extract remote name and branch from: $suffix"
     fi
 
     OUT="$remote"
@@ -1821,66 +1801,133 @@ function GetRemote {
     return 0
 }
 
-function GetRemoteHead {
-    GetRemoteOrDie
-    local remote="$OUT"
+# Resolve the current branch's upstream.
+#
+# Options:
+#  --fallback   If the current branch has no upstream, require that there is
+#               only one remote, and use that and its head as the upstream.
+#
+# Returns
+#  - the remote and branch of the upstream (but see --fallback).
+#  - the default branch and fetch URL of the remote.
+#  - the endpoint,  owner, and repo from  .gh-repos that matches the  fetch URL.
+function ResolveUpstream {
+
+    local fallback=false
+    while (( $# > 0 ))
+    do
+        case "$1" in
+            --fallback) fallback=true ;;
+            -*) Fail "Unknown option: $1" ;;
+            *) break ;;
+        esac
+        shift
+    done
+
+    (( $# == 0 )) || Fail "Extraneous arguments: $*"
+
+    if GetUpstream
+    then
+        local remote="$OUT"
+        local branch="$OUT2"
+    elif $fallback
+    then
+        # Fall back to head of remote
+        CaptureStdLines git remote
+        local -a remotes=("${OUTA[@]}")
+        case "${#remotes[@]}" in
+            0) Fail "No upstream and no remotes have been defined" ;;
+            1) : ;;
+            *) Fail "No upstream set with multiple remotes" ;;
+        esac
+        local remote="${remotes[0]}"
+        local branch=""
+    else
+        Fail "No upstream found: You can set one with: git branch -u UPSTREAM"
+    fi
+
+    ReadRemoteHead "$remote"
+    local head="$OUT"
+
+    CaptureStd git remote get-url "$remote"
+    local url="$OUT"
+
+    GetRepoFromUrl "$url"
+    local endpoint="$OUT"
+    local owner="$OUT2"
+    local repo="$OUT3"
+    local ssh_url="$OUT4"
+
+    # url examples:
+    #  - https://3f[...]7f@git.example.com/foo/bar.git
+    #  - git@github.com:vespa-engine/vespa.git
+    OUT="$remote"
+    OUT2="${branch:-$head}"
+    OUT3="$head"
+    OUT4="$url"
+    OUT5="$endpoint"
+    OUT6="$owner"
+    OUT7="$repo"
+}
+
+function gh_upstream {
+    ResolveUpstream "$@"
+    echo "remote: $OUT"
+    echo "branch: $OUT2"
+    echo "head: $OUT3"
+    echo "url: $OUT4"
+    echo "endpoint: $OUT5"
+    echo "owner: $OUT6"
+    echo "repo: $OUT7"
+}
+
+function GetHeadAt {
+    local remote="$1"
+
+    CaptureStd git rev-parse --abbrev-ref "$remote"/HEAD
+    local head="${OUT#$remote/}"
+    if test "$remote/$head" != "$OUT"
+    then
+        Fail "Failed to parse ref: $OUT"
+    fi
+
+    OUT="$head"
+}
+
+function ReadRemoteHead {
+    local remote="$1"
 
     GetGitRootRelative
-    local root="$OUT"
-    local branch="$OUT2"
+    local path="$OUT2"/refs/remotes/"$remote"/HEAD
 
-    local path="$root"/.git/refs/remotes/"$remote"/HEAD
+    test -r "$path" || Fail "No such file: $path"
 
     local content
-    content=$(< "$path")
-    local head
-    head="${content#ref: refs/remotes/$remote/}"
+    content=$(< "$path") || Fail "Failed to read $path"
+    local head="${content#ref: refs/remotes/$remote/}"
     if test "$head" == "$content"
     then
         Fail "Unexpected content of $path: $content"
     fi
 
-    OUT="$branch"
-    OUT2="$remote"
-    OUT3="$head"
+    OUT="$head"
 }
 
-function gh_remote {
-    GetRemoteHead
-
-    if test "$1" == -v || test "$1" == --verbose
-    then
-        echo "Branch: $OUT"
-        echo "Remote: $OUT2"
-        echo "Remote HEAD: $OUT3"
-    else
-        echo "$OUT $OUT2 $OUT3"
-    fi
-}
-
-# TODO: Replace usage of this with GetRemoteHead.  Consider requiring an
-# upstream in GetRemoteHead to avoid testing for return value.
+# TODO: Replace usage of this with ResolveUpstream
 function GetOriginHead {
-    GetGitRootRelative
-    local root="$OUT"
+    ResolveUpstream --fallback
+    local remote="$OUT"
+    local head="$OUT3"
 
-    local headfile="$root"/.git/refs/remotes/origin/HEAD
-    if ! test -f "$headfile"; then
-        Fail "Unable to resolve origin's HEAD branch: No such file: $headfile"
+    if test "$remote" != origin
+    then
+        Fail "Remote is not origin"
     fi
 
-    local head
-    if ! head=$(< "$headfile"); then
-        Fail "Failed to read '$headfile'"
-    fi
-
-    if ! [[ "$head" =~ ^'ref: refs/remotes/origin/'(.*)$ ]]; then
-        Fail "Unexpected content of '$headfile': $head"
-    fi
-
-    OUT="${BASH_REMATCH[1]}"
+    OUT="$head"
 }
 
+# E.g. HEAD if detached
 function GetBranch {
     if ! OUT=$(git rev-parse --abbrev-ref HEAD)
     then
@@ -1894,7 +1941,44 @@ function gh_info {
         UsageError info "Command takes exactly zero arguments"
     fi
 
-    gh_branch --full
+    GetBranch
+    local branch="$OUT"
+
+    local fetch_info
+    if test -e .git/FETCH_HEAD
+    then
+        local pull_s pull_datetime
+        # Linux
+        if pull_s=$(stat --format=%Y .git/FETCH_HEAD 2>/dev/null)
+        then
+            TZ=UTC printf -v pull_datetime "%(%Y-%m-%dT%H:%M:%S)TZ" "$pull_s"
+            printf -v pull_datetime "%(%Y-%m-%dT%H:%M:%S)T" "$pull_s"
+        else
+            # Mac OS
+            if ! pull_datetime=$(stat -t '%F %T' -f "%Sm" .git/FETCH_HEAD 2>/dev/null)
+            then
+                Fail "Failed to stat .git/FETCH_HEAD to read last pull datetime"
+            fi
+        fi
+
+        fetch_info="fetched $pull_datetime"
+    else
+        fetch_info="not fetched since clone"
+    fi
+
+    local commit_info
+    commit_info=$(git log --pretty=format:"%h" -1)
+
+    ResolveUpstream
+    local remote="$OUT"
+    local endpoint="$OUT5"
+    local owner="$OUT6"
+    local repo="$OUT7"
+
+    # path is either ., vespa, or vespa-yahoo.
+    echo "$endpoint:$owner/$repo#$branch $commit_info $fetch_info"
+    #git status -s
+
     Stage
     GIT_PAGER="less -F -X" git diff --stat HEAD
 }
@@ -2069,10 +2153,10 @@ function PullRequestInfo {
     then
         local number="$pr_id"
 
-        GitHubInfoFromOrigin
-        local endpoint="$OUT"
-        local owner="$OUT2"
-        local repo="$OUT3"
+        ResolveUpstream
+        local endpoint="$OUT5"
+        local owner="$OUT6"
+        local repo="$OUT7"
         
         if TryGetPullRequest "$endpoint" "$owner" "$repo" "$number"
         then
@@ -2117,11 +2201,11 @@ function gh_pr {
         shift
     fi
 
-    GitHubInfoFromOrigin
-    local endpoint="$OUT"
-    local owner="$OUT2"
-    local repo="$OUT3"
+    ResolveUpstream
     local ssh_url="$OUT4"
+    local endpoint="$OUT5"
+    local owner="$OUT6"
+    local repo="$OUT7"
 
     GetBranch
     local branch="$OUT"
@@ -2193,14 +2277,12 @@ function gh_resolve_wd {
         UsageError resolve-wd "Too many arguments"
     fi
 
-    GetRemoteGitHub
-    local endpoint="$OUT"
-    local owner="$OUT2"
-    local repo="$OUT3"
+    ResolveUpstream
+    local remote="$OUT"
+    local endpoint="$OUT5"
+    local owner="$OUT6"
+    local repo="$OUT7"
     local ssh_url="$OUT4"
-
-    GetBranch
-    local branch="$OUT"
 
     Format "$format" e="$endpoint" o="$owner" r="$repo" b="$branch" s="$ssh_url"
     printf "%s" "$OUT"
@@ -2428,6 +2510,10 @@ function gh_stack_diff {
 function gh_stack_drop {
     ParseStackElementId "$@"
     RunOrFail git stash drop "${OUTA[@]}"
+}
+
+function gh_log {
+    git log --graph --format=fuller
 }
 
 function gh_stack_list {
@@ -2742,12 +2828,6 @@ function PressAnyKey {
 # TODO: Allow open of editor when submitting
 function CommitView {
 
-    GitHubInfoFromOrigin
-    local endpoint="$OUT"
-    local owner="$OUT2"
-    local repo="$OUT3"
-    local ssh_url="$OUT4"
-
     # TODO: Get proper user from ResolveEndpoint
     local tmpbranch=hakonhall/tmp
 
@@ -2761,8 +2841,15 @@ function CommitView {
         GetBranch
         local branch="$OUT"
 
-        GetOriginHead
-        local master="$OUT"
+        ResolveUpstream
+        local remote="$OUT"
+        local master="$OUT3"
+        local ssh_url="$OUT4"
+        local endpoint="$OUT5"
+        local owner="$OUT6"
+        local repo="$OUT7"
+
+        test "$remote" == origin || Fail "Remote is not origin"
 
         if test "$upstream" == ""
         then
@@ -3447,11 +3534,11 @@ function gh_view {
 }
 
 function gh_www {
-    GitHubInfoFromOrigin
-    local endpoint="$OUT"
-    local owner="$OUT2"
-    local repo="$OUT3"
+    ResolveUpstream
     local ssh_url="$OUT4"
+    local endpoint="$OUT5"
+    local owner="$OUT6"
+    local repo="$OUT7"
 
     GetBranch
     local branch="$OUT"
@@ -3493,19 +3580,20 @@ function gh_submit {
     GetBranch
     local branch="$OUT"
 
-    GetOriginHead
-    local master="$OUT"
+    ResolveUpstream
+    local remote="$OUT"
+    local master="$OUT3"
+    local ssh_url="$OUT4"
+    local endpoint="$OUT5"
+    local owner="$OUT6"
+    local repo="$OUT7"
+
+    test "$remote" == origin || Fail "Only 'origin' remote is supported"
 
     if test "$branch" == "$master"
     then
         UsageError submit "Cannot submit $master branch"
     fi
-
-    GitHubInfoFromOrigin
-    local endpoint="$OUT"
-    local owner="$OUT2"
-    local repo="$OUT3"
-    local ssh_url="$OUT4"
 
     if GetPullRequestNumber "$endpoint" "$owner" "$repo" "$branch"
     then
@@ -3548,6 +3636,9 @@ function GetGitRootRelative {
     if ((${#root} == 0))
     then
         root=.
+        local git=.git
+    else
+        local git="$root/.git"
     fi
 
     if ! [ -d "$root" ]
@@ -3556,6 +3647,7 @@ function GetGitRootRelative {
     fi
 
     OUT="$root"
+    OUT2="$git"
 }
 
 function Stage {
@@ -3702,9 +3794,10 @@ function CreatePullRequest {
     if test "$title" == ""
     then
         GetGitRootRelative
-        local root="$OUT"
+        local titles_file="$OUT"/.git/gh.titles
+        titles_file="${titles_file#./}"
 
-        if [ -r "$root"/.git/gh.titles ]
+        if [ -r "$titles_file" ]
         then
             while read -r
             do
@@ -3713,22 +3806,14 @@ function CreatePullRequest {
                     title="${BASH_REMATCH[1]}"
                     break
                 fi
-            done < "$root"/.git/gh.titles
+            done < "$titles_file"
         fi
 
         if test "$title" == ""
         then
-            # TODO: If more than 1 commit ahead of merge fetch head on origin
-            # (e.g. origin/master), we should open an editor to specify title
-            # and body.
-
-            title=$(git log -1 --format=%s HEAD)
-
-            body=$(git log -1 --format=%b HEAD)
-            if [[ "$body" =~ ^[' '$'\n'$'\r']+$ ]]
-            then
-                body=""
-            fi
+            # Consider opening up an editor with the last message as the
+            # suggestion for the title.
+            Fail "No title set and none found in $titles_file"
         fi
     fi
 
@@ -3753,6 +3838,11 @@ Options:
   --reviewers,-r USERS     Set the pull request reviewers to USERS, once the
                            pull request checks pass.
   --no-wait,-w             Do not wait for checks to pass.
+
+If there are no local changes, and the current branch does not match the
+upstream branch name (typically master), and the current branch hasn't been
+pushed to the push upstream, then the branch is pushed, and a PR with MESSAGE as
+the title is created.
 EOF
     exit 0
 }
@@ -3771,18 +3861,25 @@ function GetBranchName {
     ResolveEndpoint "$endpoint"
     local user="$OUT2"
 
-    if test "$owner" == vespa -a "$repo" == vespa-yahoo
-    then
-            # HACK: Special code invoked when branch are identical, so force
-            # one user.  Don't merge this gh version...
-            user=hakonhall
-    fi
-
     OUT="$user/$branch"
 }
 
+function GitRefsAreEqual {
+    CaptureStd git rev-parse "$1"
+    local first_commit="$OUT"
+    shift
+
+    local ref
+    for ref in "$@"
+    do
+        CaptureStd git rev-parse "$ref"
+        test "$OUT" == "$first_commit" || return 1
+    done
+    return 0
+}
+
 function gh_checkin {
-    local assignee="" merge=false ptal=false title="" open_google_chrome=false
+    local assignee="" merge=false ptal=false open_google_chrome=false
     local escaped_edit_option= reviewers="" wait=true comment=
     while (( $# > 0 ))
     do
@@ -3829,11 +3926,42 @@ function gh_checkin {
         esac
     done
 
-    GitHubInfoFromOrigin
-    local endpoint="$OUT"
-    local owner="$OUT2"
-    local repo="$OUT3"
+    local title=
+    if (( $# > 0 )); then
+        title="$1"
+        shift
+        if (( ${#comment} == 0 )); then
+            comment="$title"
+        fi
+        if (( $# > 0 )); then
+            UsageError checkin "Extraneous arguments after TITLE: $*"
+        fi
+    fi
+
+    # Either an upstream remote is set, or there must be exactly one remote
+    # configured.
+    #
+    # We will eventually push to a remote branch: That branch cannot (MUST NOT)
+    # be the remote default branch (aka head and often called "master").  That
+    # would be "pushing directly to master" and a no-go.
+    #
+    # Therefore, if the upstream's remote branch is equal to the remote head, we
+    # will need to create a diffentely named local branch (unless the local
+    # branch already has a name != remote branch), and push the local branch.
+    #
+    # The --fallback option will fall back to using the configured remote as the
+    # upstream, if the current branch has no upstream, and fails if more than
+    # one remote is configured.
+    ResolveUpstream --fallback
+    local remote="$OUT"
+    local remote_branch="$OUT2"
+    local remote_head="$OUT3"
     local ssh_url="$OUT4"
+    local endpoint="$OUT5"
+    local owner="$OUT6"
+    local repo="$OUT7"
+
+    test "$remote" == origin || Fail "Unsupported remote: $remote"
 
     # This check has to be done before any mutable operations: the below branch
     # creation.
@@ -3851,76 +3979,63 @@ function gh_checkin {
         reviewers="$OUT"
     fi
 
-    local known_to_be_dirty=false
-
     GetBranch
     local branch="$OUT"
 
-    GetOriginHead
-    local master="$OUT"
-
-    if test "$branch" == "$master"
+    if test "$remote_branch" == "$remote_head"
     then
-        if IsClean
+        # We never push to the remote default/head/master branch.
+
+        if test "$branch" == "$remote_head"
         then
-            Fail "On $master branch, and there's nothing to commit"
+            if (( ${#title} == 0 )); then
+                UsageError checkin "Unable to create a new branch w/o title"
+            fi
+
+            GetBranchName "$title" "$endpoint"
+            local branch_name="$OUT"
+
+            if test "$branch_name" == "$remote_head"; then
+                Fail "Branch name derived from title ($title) " \
+                     "equals remote branch head ($remote_head)"
+            fi
+
+            Stage
+            git stash save --quiet --include-untracked
+            if ! git checkout --quiet -b "$branch_name"; then
+                Fail "Error checking out new branch! " \
+                     "To retrieve your work, issue 'git stash pop'"
+            fi
+            git stash pop --quiet
+            branch="$branch_name"
         fi
-        known_to_be_dirty=true
 
-        if (( $# != 1 ))
-        then
-            UsageError checkin "Missing TITLE argument"
-        fi
-        local title="$1"
-
-        GetBranchName "$title" "$endpoint"
-        branch="$OUT"
-
-        if test "$comment" == ""
-        then
-            local message="$title"
-        else
-            local message="$comment"
-        fi
-
-        Stage
-        git stash save --quiet --include-untracked
-        if ! git checkout --quiet -b "$branch"
-        then
-            echo "Error checking out new branch!"
-            echo "To retrieve your work, issue 'git stash pop'"
-            exit 1
-        fi
-        git stash pop --quiet
-
-        Stage
-        git commit --quiet $escaped_edit_option -m "$message"
-    elif ! IsClean
-    then
-        local -a args=()
-        case "$#" in
-            0) : ;;
-            1) args+=(-m "$1") ;;
-            *) UsageError checkin "Too many arguments" ;;
-        esac
-
-        Stage
-        git commit --quiet $escaped_edit_option "${args[@]}"
-    elif (( $# != 0 ))
-    then
-        UsageError checkin "Too many arguments: No local changes but " \
-                   "TITLE given"
+        remote_branch="$branch"
     fi
-    
-    git push -q -u origin "$branch"
 
-    if GetPullRequestNumber "$endpoint" "$owner" "$repo" "$branch"
+    if ! IsClean; then
+        if (( ${#comment} == 0 )); then
+            UsageError checkin "Cannot commit without COMMENT and TITLE"
+        fi
+
+        Stage
+        git commit --quiet $escaped_edit_option -m "$comment"
+    fi
+
+    if GitRefsAreEqual "$branch" "$remote/$remote_branch"; then
+        echo "Nothing to push"
+        return 0
+    fi
+
+    git push -q -u "$remote" "$remote_branch"
+
+    if GetPullRequestNumber "$endpoint" "$owner" "$repo" "$remote_branch"
     then
         local number="$OUT"
         local url="$OUT2"
         echo "Found pull request $url"
     else
-        CreatePullRequest "$endpoint" "$owner" "$repo" "$branch"
+        CreatePullRequest "$endpoint" "$owner" "$repo" "$remote_branch" "$title"
         local number="$OUT"
         local url="$OUT2"
         echo "Created pull request $url"
@@ -4037,11 +4152,11 @@ function gh_branch {
 
     if $full
     then
-        GitHubInfoFromOrigin
-        local endpoint="$OUT"
-        local owner="$OUT2"
-        local repo="$OUT3"
+        ResolveUpstream
         local ssh_url="$OUT4"
+        local endpoint="$OUT5"
+        local owner="$OUT6"
+        local repo="$OUT7"
 
         branch="$endpoint:$owner/$repo#$branch"
     fi
@@ -4050,11 +4165,10 @@ function gh_branch {
 }
 
 function GetRepoId {
-    GitHubInfoFromOrigin
-    local endpoint="$OUT"
-    local owner="$OUT2"
-    local repo="$OUT3"
-    local ssh_url="$OUT4"
+    ResolveUpstream
+    local endpoint="$OUT5"
+    local owner="$OUT6"
+    local repo="$OUT7"
 
     OUT="$endpoint:$owner/$repo"
 }
@@ -4064,12 +4178,70 @@ function gh_repo {
     echo "$OUT"
 }
 
+function GetCommitBefore {
+    local datetime="$1"
+
+    local commit=""
+    local -i code=1
+
+    local d='[0-9]'
+    if [[ "$datetime" =~ ^@?($d{4}-$d{2}-$d{2}[T' ']$d{2}:$d{2}:$d{2}Z?)$ ]]
+    then
+        local time="${BASH_REMATCH[1]}"
+
+        GetBranch
+        local branch="$OUT"
+
+        ResolveUpstream --fallback
+        local branch="$OUT/$OUT2"
+
+        # --topo-order should be identical to --date-order because of
+        # --first-parent.  This traverses the history of the branch as seen by
+        # github, which is what we want.
+        CaptureStd git rev-list --first-parent --topo-order -n 1 \
+                   --before="$time" "$branch"
+        commit="$OUT"
+        code=0
+    fi
+
+    OUT="$commit"
+    return $code
+}
+
+function gh_commit_before {
+    local quiet=false
+    while (( $# > 0 ))
+    do
+        case "$1" in
+            -q|--quiet) quiet=true ;;
+            -*) Fail "Invalid option: $1" ;;
+            *) break ;;
+        esac
+        shift
+    done
+
+    (( $# > 0 )) || Fail "Missing DATETIME"
+    local datetime="$1"
+    shift
+    (( $# == 0 )) || Fail "Extraneous arguments after DATETIME: $*"
+
+    GetCommitBefore "$datetime" || Fail "Invalid time: $datetime"
+    local commit="$OUT"
+
+    if $quiet
+    then
+        echo "$commit"
+    else
+        git log -n 1 "$commit"
+    fi
+}
+
 function gh_checkout {
     if (( $# != 1 ))
     then
         UsageError checkout "Command takes exactly one argument"
     fi
-    local branch_or_pr_number_or_pr_url="$1"
+    local ref="$1"
 
     local need_to_pop=false
     if ! IsClean
@@ -4079,9 +4251,25 @@ function gh_checkout {
     fi
 
     local pending_error_message=
-    if ! git checkout --quiet "$branch_or_pr_number_or_pr_url" 2> /dev/null
+    if GetCommitBefore "$ref"
     then
-        if PullRequestInfo "$branch_or_pr_number_or_pr_url"
+        local commit="$OUT"
+
+        # git log -n 1 --date=format:'%Y-%m-%d %H:%M:%S%Z' --pretty=format:"Found %h committed %cd%n"
+
+        #CaptureStd git log -n 1 --pretty=format:"%ai" "$commit"
+        #local commit_time="$OUT"
+        #echo "Rewinding to $commit at $commit_time"
+
+        git checkout --quiet "$commit"
+        #git log -n 1 --pretty=format:"%ai: %h: %s (%an)%n"
+        git log -n 1 --date=format:'%Y-%m-%d %H:%M:%S%Z' --pretty=format:"Checked out %h authored %ad committed %cd%n"
+    elif [[ "$ref" =~ ^@ ]]
+    then
+        pending_error_message="Invalid time format: must be @YYYY-mm-ddTHH:MM:SS[Z]"
+    elif ! git checkout --quiet "$ref" 2> /dev/null
+    then
+        if PullRequestInfo "$ref"
         then
             pr_endpoint="$OUT"
             pr_owner="$OUT2"
@@ -4089,10 +4277,10 @@ function gh_checkout {
             pr_branch="$OUT4"
             pr_number="$OUT5"
 
-            GitHubInfoFromOrigin
-            local current_endpoint="$OUT"
-            local current_owner="$OUT2"
-            local current_repo="$OUT3"
+            ResolveUpstream
+            local current_endpoint="$OUT5"
+            local current_owner="$OUT6"
+            local current_repo="$OUT7"
 
             if test "$pr_endpoint" == "$current_endpoint" && \
                     test "$pr_owner" == "$current_owner" && \
@@ -4109,10 +4297,10 @@ function gh_checkout {
                     pending_error_message="Failed to check out '$pr_branch'"
                 fi
             else
-                pending_error_message="Pull request '$branch_or_pr_number_or_pr_url' refers to a different repository"
+                pending_error_message="Pull request '$ref' refers to a different repository"
             fi
         else
-            pending_error_message="'$branch_or_pr_number_or_pr_url' is neither a branch, PR number, or PR URL"
+            pending_error_message="'$ref' is neither a branch, PR number, PR URL, or timestamp"
         fi
     fi
 
@@ -4251,10 +4439,17 @@ function gh_diff {
 }
 
 function gh_head {
-    GetOriginHead
-    local master="$OUT"
+    ResolveUpstream --fallback
+    local remote="$OUT"
+    local head="$OUT3"
 
-    gh_checkout "$master"
+    GetBranch
+    local branch="$OUT"
+
+    if test "$branch" != "$head"
+    then
+        gh_checkout "$head"
+    fi
     gh_update
 }
 
@@ -5212,11 +5407,11 @@ function LookupLogin {
 }
 
 function gh_reviewers {
-    GitHubInfoFromOrigin
-    local endpoint="$OUT"
-    local owner="$OUT2"
-    local repo="$OUT3"
+    ResolveUpstream
     local ssh_url="$OUT4"
+    local endpoint="$OUT5"
+    local owner="$OUT6"
+    local repo="$OUT7"
 
     GetBranch
     local branch="$OUT"
@@ -5382,10 +5577,10 @@ function gh_wait {
 
     if (( $# == 0 ))
     then
-        GitHubInfoFromOrigin
-        local endpoint="$OUT"
-        local owner="$OUT2"
-        local repo="$OUT3"
+        ResolveUpstream
+        local endpoint="$OUT5"
+        local owner="$OUT6"
+        local repo="$OUT7"
 
         GetBranch
         local branch="$OUT"
@@ -5428,6 +5623,7 @@ declare -A UNOFFICIAL_COMMANDS=(
     [c]=gh_commit
     [checkout]=gh_checkout
     [commit]=gh_commit
+    [commit-before]=gh_commit_before
     [co]=gh_checkout
     [di]=gh_diff
     [diff]=gh_diff
@@ -5440,6 +5636,7 @@ declare -A UNOFFICIAL_COMMANDS=(
     [is-clean]=IsClean
     [load]=gh_load
     [load2]=gh_load_files
+    [log]=gh_log
     [ls]=gh_stack_list
     [m]=gh_menu
     [menu]=gh_menu
@@ -5452,7 +5649,6 @@ declare -A UNOFFICIAL_COMMANDS=(
     [pop]=gh_stack_pop
     [pr]=gh_pr
     [push]=gh_stack_push
-    [remote]=gh_remote
     [repo]=gh_repo
     [resolve-endpoint]=gh_resolve_endpoint
     [resolve-pr]=gh_resolve_pr
@@ -5472,6 +5668,7 @@ declare -A UNOFFICIAL_COMMANDS=(
     [uncommit]=gh_uncommit
     [up]=gh_update
     [update]=gh_update
+    [upstream]=gh_upstream
     [v]=gh_view
     [view]=gh_view)
 
