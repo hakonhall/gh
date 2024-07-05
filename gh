@@ -3871,7 +3871,6 @@ function GitRefsAreEqual {
     git show-ref --quiet --verify "$ref" || return 1
     CaptureStd git rev-parse "$ref"
     local first_commit="$OUT"
-    shift
 
     local ref
     for ref in "$@"
