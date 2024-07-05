@@ -3865,13 +3865,18 @@ function GetBranchName {
 }
 
 function GitRefsAreEqual {
-    CaptureStd git rev-parse "$1"
+    local ref="$1"
+    shift
+
+    git show-ref --quiet --verify "$ref" || return 1
+    CaptureStd git rev-parse "$ref"
     local first_commit="$OUT"
     shift
 
     local ref
     for ref in "$@"
     do
+        git show-ref --quiet --verify "$ref" || return 1
         CaptureStd git rev-parse "$ref"
         test "$OUT" == "$first_commit" || return 1
     done
@@ -4022,7 +4027,9 @@ function gh_checkin {
         git commit --quiet $escaped_edit_option -m "$comment"
     fi
 
-    if GitRefsAreEqual "$branch" "$remote/$remote_branch"; then
+    if GitRefsAreEqual "refs/heads/$branch" \
+                       "refs/remotes/$remote/$remote_branch"
+    then
         echo "Nothing to push"
         return 0
     fi
