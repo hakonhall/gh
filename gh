@@ -5170,7 +5170,10 @@ function WaitForChecksThen {
     local assignee="$7" # Possibly bad
     local merge="$8"
     local ptal="$9"
-    local reviewers_string="${10}" # Possibly bad
+    shift || true # ${10} doesn't work
+    local reviewers_string="$9" # Possibly bad
+    shift || true
+    local check="${9:-true}"
 
     if test "$assignee" != ""
     then
@@ -5191,8 +5194,11 @@ function WaitForChecksThen {
     local -a assignees=("${OUTA[@]}")
     local -a current_reviewers=("${OUTA2[@]}")
 
-    WaitForChecks "$endpoint" "$owner" "$repo" "$number" "$commit" \
-                  "$last_comment_id"
+    if $check
+    then
+        WaitForChecks "$endpoint" "$owner" "$repo" "$number" \
+                      "$commit" "$last_comment_id"
+    fi
 
     if test "$assignee" != ""
     then
@@ -5296,6 +5302,35 @@ function WaitForChecksThen {
     fi
 
     echo Success
+}
+
+function gh_update_pr {
+    local comment
+
+    while (( $# > 0 ))
+    do
+        case "$1" in
+            -c)
+                comment="$2"
+                shift
+                ;;
+            -*) Fail "Invalid option: $1" ;;
+            *) Fail "Invalid argument: $1" ;;
+        esac
+        shift
+    done
+
+    GetPullRequest "$endpoint" "$owner" "$repo" "$number"
+    local branch="$OUT"
+    local commit="$OUT2"
+    local last_comment_id="$OUT4"
+    local -a assignees=("${OUTA[@]}")
+    local -a current_reviewers=("${OUTA2[@]}")
+
+    if (( ${#comment} > 0 ))
+    then
+        :
+    fi
 }
 
 function GetMentionableUsers {
@@ -5545,7 +5580,8 @@ EOF
 }
 
 function gh_wait {
-    local assignee= approve=false comment= merge=false ptal=false reviewers=
+    local assignee= approve=false comment= merge=false ptal=false
+    local reviewers= check=true
     while (($# > 0))
     do
         case "$1" in
@@ -5572,6 +5608,10 @@ function gh_wait {
             -r|--reviewers)
                 reviewers="$2"
                 shift 2
+                ;;
+            -w)
+                check=false
+                shift
                 ;;
             *)
                 break
@@ -5620,7 +5660,7 @@ function gh_wait {
 
     WaitForChecksThen "$endpoint" "$owner" "$repo" "$number" \
                       "$approve" "$comment" "$assignee" "$merge" "$ptal" \
-                      "$reviewers"
+                      "$reviewers" "$check"
 }
 
 declare -A UNOFFICIAL_COMMANDS=(
