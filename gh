@@ -23,10 +23,14 @@ declare -A COMMANDS=(
     [ci]=gh_checkin
     [clone]=gh_clone
     [commands]=gh_commands
+    [desc]=gh_description
+    [describe]=gh_description
+    [description]=gh_description
     [edit]=gh_edit
     [h]=gh_help
     [help]=gh_help
     [refresh]=gh_refresh
+    [title]=gh_title
     [wait]=gh_wait
     [www]=gh_www)
 
@@ -97,6 +101,8 @@ COMMANDS
   save2 [-n NAME]
       Save all modified files below ~/.gh.save (or ~/.gh.save.d/NAME).  Can be
       reapplied with load2 subcommand.
+  title [TITLE]
+      Set or update future PR title (.git/.gh.titles).
   p
       Pop last stack element onto working.
   s
@@ -1340,7 +1346,7 @@ function gh_new_pr {
         local titles_file="$root"/.git/gh.titles
     fi
 
-    printf "%s\t%s\n" "$new_branch" "$title" >> "$titles_file"
+    printf "%s\t%s\n" "$new_branch" "$title" > "$titles_file"
     echo "$titles_file has been updated"
 }
 
@@ -1459,6 +1465,70 @@ function gh_refresh {
     fi
     sort "$repos_workfile" > "$REPOS_FILE"
     rm "$repos_workfile"
+}
+
+function gh_description {
+    GetGitRootRelative
+    local file="$OUT"/.git/gh.description
+    file="${file#./}"
+
+    while (( $# > 0 ))
+    do
+        case "$1" in
+            -*) Fail "Unknown option: $1" ;;
+            *) break ;;
+        esac
+    done
+
+    if (( $# == 0 ))
+    then
+        if ! emacs "$file"
+        then
+            rm -f "$file"
+        fi
+    elif (( $# > 1 ))
+    then
+        UsageError title "Takes 0 or 1 arguments"
+    else
+        printf "%s" "$1" > "$file"
+    fi
+
+    if test -e "$file" && ! test -s "$file"
+    then
+        rm -f "$file"
+    fi
+}
+
+function gh_title {
+    GetGitRootRelative
+    local file="$OUT"/.git/gh.titles
+    file="${file#./}"
+
+    while (( $# > 0 ))
+    do
+        case "$1" in
+            -*) Fail "Unknown option: $1" ;;
+            *) break ;;
+        esac
+    done
+
+    if (( $# == 0 ))
+    then
+        if ! emacs "$file"
+        then
+            rm -f "$file"
+        fi
+    elif (( $# > 1 ))
+    then
+        UsageError title "Takes 0 or 1 arguments"
+    else
+        printf "%s" "$1" > "$file"
+    fi
+
+    if test -e "$file" && ! test -s "$file"
+    then
+        rm -f "$file"
+    fi
 }
 
 # Get the repo from repos file (.gh-repos) with the given URL
