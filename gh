@@ -18,6 +18,8 @@ declare -r OLD_REPOS_FILE="$CONFIG_ROOT"/.gh-repos.old
 declare -r DIFF_FILE="$CONFIG_ROOT"/.gh.diff
 declare -r SAVE_DIR="$CONFIG_ROOT"/.gh.save
 
+declare -r TITLES_FILE=gh.title
+
 declare -A COMMANDS=(
     [checkin]=gh_checkin
     [ci]=gh_checkin
@@ -114,6 +116,11 @@ COMMANDS
   upstream [--fallback]
       Resolve the upstream, optionally falling back to the single configured
       remote and its default branch.
+  remote-head
+  upstream-head
+      Print the HEAD branch name of the upstream remote.  If the current branch
+      doesn't have any upstream remote, but there is only one remote, assume
+      that remote.  Same as 3rd line from 'upstream --fallback'.
   wait [OPTION...] [PR_URL]
       Wait for checks to pass.
       Options are applied if and after the checks pass:
@@ -1951,6 +1958,11 @@ function gh_upstream {
     echo "repo: $OUT7"
 }
 
+function gh_upstream_head {
+    ResolveUpstream --fallback
+    echo "$OUT3"
+}
+
 function GetHeadAt {
     local remote="$1"
 
@@ -2003,6 +2015,50 @@ function GetBranch {
     then
         Fail "Failed to get branch with 'git rev-parse --abbrev-ref HEAD'"
     fi
+}
+
+function gh_help_in {
+    cat <<EOF
+Usage: gh in A B
+Returns exit code 0 if commit/branch A equals B or one of its ancestors.
+EOF
+    exit 0
+}
+
+# Usage GitRefsAreEqual2 A B
+# Return 0 if the commit or branch A refers to the same git as B.
+function GitRefsAreEqual2 {
+    local refA="$1"
+    local refB="$2"
+    if test "$(git rev-parse "$refA")" ==  "$(git rev-parse "$refB")"
+    then
+        return 0
+    else
+        return 1
+    fi
+}
+
+function gh_in {
+    if (( $# < 1 ))
+    then
+        UsageError in "Missing commit A"
+    fi
+    local commitA="$1"
+    shift
+
+    if (( $# < 1 ))
+    then
+        UsageError in "Missing commit B"
+    fi
+    local commitB="$1"
+    shift
+
+    if (( $# > 0 ))
+    then
+        UsageError in "Extraneous arguments: $*"
+    fi
+
+    git merge-base --is-ancestor "$commitA" "$commitB"
 }
 
 function gh_info {
@@ -4105,17 +4161,36 @@ function gh_checkin {
 
     git push -q -u "$remote" "$remote_branch"
 
+    if test "$root" == .
+    then
+        local titles_file=.git/gh.titles
+    else
+        local titles_file="$root"/.git/gh.titles
+    fi
+
     if GetPullRequestNumber "$endpoint" "$owner" "$repo" "$remote_branch"
     then
         local number="$OUT"
         local url="$OUT2"
         echo "Found pull request $url"
     else
+        local saved_title=
+        if test -r "$titles_file"
+        then
+            saved_title=$(< "$titles_file")
+            if (( ${#saved_title} > 0 ))
+            then
+                title="$saved_title"
+                echo "Using saved PR title: $title"
+            fi
+        fi
+
         CreatePullRequest "$endpoint" "$owner" "$repo" "$remote_branch" "$title"
         local number="$OUT"
         local url="$OUT2"
         echo "Created pull request $url"
     fi
+    rm -f "$titles_file" # Avoid leaking title file across PRs
 
     if $open_google_chrome
     then
@@ -4192,6 +4267,60 @@ function gh_clean_branch {
             echo "Removed '$branch'"
         fi
     done
+}
+
+function gh_help_ancestor {
+    cat <<EOF
+Usage: gh ancestorof A B
+Return exit code 0 if commit or branch A is an ancestor of (or equal to) B.
+EOF
+    exit 0
+}
+
+function gh_ancestor_of {
+    if (( $# < 1 ))
+    then
+        UsageError ancestor "Missing commit A"
+    fi
+    local commitA="$1"
+    shift
+
+    if (( $# < 1 ))
+    then
+        UsageError ancestor "Missing commit B"
+    fi
+    local commitB="$1"
+    shift
+
+    if (( $# > 0 ))
+    then
+        UsageError ancestor "Extraneous arguments: $*"
+    fi
+
+    git merge-base --is-ancestor "$commitA" "$commitB"
+}
+
+function gh_equals {
+    if (( $# < 1 ))
+    then
+        UsageError equals "Missing commit A"
+    fi
+    local commitA="$1"
+    shift
+
+    if (( $# < 1 ))
+    then
+        UsageError equals "Missing commit B"
+    fi
+    local commitB="$1"
+    shift
+
+    if (( $# > 0 ))
+    then
+        UsageError equals "Extraneous arguments: $*"
+    fi
+
+    GitRefsAreEqual2 "$commitA" "$commitB"
 }
 
 function gh_branch {
@@ -5734,6 +5863,7 @@ function gh_wait {
 }
 
 declare -A UNOFFICIAL_COMMANDS=(
+    [ancestorof]=gh_ancestor_of
     [b]=gh_branch
     [branch]=gh_branch
     [c]=gh_commit
@@ -5744,10 +5874,12 @@ declare -A UNOFFICIAL_COMMANDS=(
     [di]=gh_diff
     [diff]=gh_diff
     [drop]=gh_stack_drop
+    [equals]=gh_equals
     [head]=gh_head
     [hi]=gh_history
     [history]=gh_history
     [i]=gh_info
+    [in]=gh_in
     [info]=gh_info
     [is-clean]=IsClean
     [load]=gh_load
@@ -5765,6 +5897,7 @@ declare -A UNOFFICIAL_COMMANDS=(
     [pop]=gh_stack_pop
     [pr]=gh_pr
     [push]=gh_stack_push
+    [remote-head]=gh_upstream_head
     [repo]=gh_repo
     [resolve-endpoint]=gh_resolve_endpoint
     [resolve-pr]=gh_resolve_pr
@@ -5785,6 +5918,7 @@ declare -A UNOFFICIAL_COMMANDS=(
     [up]=gh_update
     [update]=gh_update
     [upstream]=gh_upstream
+    [upstream-head]=gh_upstream_head
     [v]=gh_view
     [view]=gh_view)
 
