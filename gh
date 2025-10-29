@@ -18,8 +18,6 @@ declare -r OLD_REPOS_FILE="$CONFIG_ROOT"/.gh-repos.old
 declare -r DIFF_FILE="$CONFIG_ROOT"/.gh.diff
 declare -r SAVE_DIR="$CONFIG_ROOT"/.gh.save
 
-declare -r TITLES_FILE=gh.title
-
 declare -A COMMANDS=(
     [checkin]=gh_checkin
     [ci]=gh_checkin
@@ -103,8 +101,11 @@ COMMANDS
   save2 [-n NAME]
       Save all modified files below ~/.gh.save (or ~/.gh.save.d/NAME).  Can be
       reapplied with load2 subcommand.
-  title [TITLE]
-      Set or update future PR title (.git/.gh.titles).
+  timeof [REF]
+      Print the commit date of the commit REF.
+  title [-p|-P|-d|-D|TITLE]
+      Set or update future PR title (.git/.gh.titles).  Print (all) title with
+      -p (-P), and delete (all) with -d (-D).
   p
       Pop last stack element onto working.
   s
@@ -1288,6 +1289,102 @@ function gh_menu {
     CopyHashTo OUTH2 statuses
 }
 
+function GetTitlesFile {
+    GetGitRootRelative
+    local root="$OUT"
+
+    if test "$root" == .
+    then
+        local titles_file=.git/gh.titles
+    else
+        local titles_file="$root"/.git/gh.titles
+    fi
+
+    OUT="$titles_file"
+}
+
+function SetTitle {
+    local title="$1"
+    local branch="$2" # defaults to current branch, if empty
+
+    if (( ${#branch} == 0 ))
+    then
+        GetBranch
+        branch="$OUT"
+    fi
+
+    GetTitlesFile
+    local titles_file="$OUT"
+
+    if test -e "$titles_file"
+    then
+        sed -i "\\|^$branch |d" "$titles_file" || true
+    fi
+    echo "$branch $title" >> "$titles_file"
+}
+
+function DeleteTitle {
+    local branch="$1" # defaults to current branch, if empty
+
+    if (( ${#branch} == 0 ))
+    then
+        GetBranch
+        branch="$OUT"
+    fi
+
+    GetTitlesFile
+    local titles_file="$OUT"
+
+    if test -e "$titles_file"
+    then
+        sed -i "\\|^$branch |d" "$titles_file" || true
+        if ! test -s "$titles_file"
+        then
+            rm "$titles_file"
+        fi
+    fi
+}
+
+function GetTitle {
+    local branch="$1" # defaults to current branch
+
+    if (( ${#branch} == 0 ))
+    then
+        GetBranch
+        branch="$OUT"
+    fi
+
+    GetTitlesFile
+    local titles_file="$OUT"
+
+    local title=""
+    if test -r "$titles_file"
+    then
+        while read -r
+        do
+            if [[ "$REPLY" =~ ^"$branch "(.*) ]]
+            then
+                title="${BASH_REMATCH[1]}"
+                break
+            fi
+        done < "$titles_file"
+    fi
+
+    OUT="$title"
+}
+
+function PrintOuts {
+    local name
+    for name in "$@"
+    do
+        local -n ref="$name"
+        if (( ${#ref} > 0 ))
+        then
+            echo "$name=$ref"
+        fi
+    done
+}
+
 # Aliases:  new, new-pr, prepare, prepare-pr
 function gh_new_pr {
     if (( $# != 1 ))
@@ -1311,22 +1408,15 @@ function gh_new_pr {
     local owner="$OUT6"
     local repo="$OUT7"
 
-    if [ "$current_branch" != "$upstream_head" ]; then
-        UsageError new-pr "Current branch not $upstream_head: $current_branch"
-    fi
-
     GetBranchName "$title" "$endpoint"
     local new_branch="$OUT"
 
     if IsClean
     then
-        Run git checkout -q -b "$new_branch"
+        Run git checkout -q -b "$new_branch" "$upstream_head"
     else
-        # May not be needed?  Needed only with untracked files?
-        #Stage
-        #git stash save --quiet --include-untracked
         Run git stash save -q --include-untracked
-        if ! Run git checkout -b "$new_branch"
+        if ! Run git checkout -b "$new_branch" "$upstream_head"
         then
             echo "Error checking out new branch!"
             echo "To retrieve your work, issue 'git stash pop'"
@@ -1343,18 +1433,7 @@ function gh_new_pr {
 
     Run git push -u "$upstream_remote" "$new_branch"
 
-    GetGitRootRelative
-    local root="$OUT"
-
-    if test "$root" == .
-    then
-        local titles_file=.git/gh.titles
-    else
-        local titles_file="$root"/.git/gh.titles
-    fi
-
-    printf "%s\t%s\n" "$new_branch" "$title" > "$titles_file"
-    echo "$titles_file has been updated"
+    SetTitle "$title"
 }
 
 function gh_repos {
@@ -1507,13 +1586,32 @@ function gh_description {
 }
 
 function gh_title {
-    GetGitRootRelative
-    local file="$OUT"/.git/gh.titles
-    file="${file#./}"
-
     while (( $# > 0 ))
     do
         case "$1" in
+            -p|--print)
+                GetTitle
+                (( ${#OUT} == 0 )) || echo "$OUT"
+                return
+                ;;
+            -P|--print-all)
+                GetTitlesFile
+                local titles_file="$OUT"
+                if test -e "$titles_file"
+                then
+                   cat "$titles_file"
+                fi
+                return
+                ;;
+            -d|--delete)
+                DeleteTitle
+                return
+                ;;
+            -D|--delete-all)
+                GetTitlesFile
+                rm -f "$OUT"
+                return
+                ;;
             -*) Fail "Unknown option: $1" ;;
             *) break ;;
         esac
@@ -1521,20 +1619,41 @@ function gh_title {
 
     if (( $# == 0 ))
     then
-        if ! emacs "$file"
-        then
-            rm -f "$file"
-        fi
-    elif (( $# > 1 ))
-    then
-        UsageError title "Takes 0 or 1 arguments"
-    else
-        printf "%s" "$1" > "$file"
-    fi
+        local tmpfile
+        tmpfile=$(mktemp)
 
-    if test -e "$file" && ! test -s "$file"
-    then
-        rm -f "$file"
+        local tmpfile_escaped
+        printf -v tmpfile_escaped "%q" "$tmpfile"
+        trap "rm -f $tmpfile_escaped" RETURN
+
+        GetTitle
+        local title="$OUT"
+
+        echo "$title" > "$tmpfile"
+
+        if ! emacs "$tmpfile"
+        then
+            return
+        fi
+
+        local new_title=$(< "$tmpfile")
+        if (( ${#new_title} == 0 ))
+        then
+            DeleteTitle
+        elif test "$new_title" != "$title"
+        then
+            SetTitle "$new_title"
+        fi
+    else
+        local title="$1"
+        shift
+
+        if (( $# > 0 ))
+        then
+            UsageError title "Takes 0 or 1 arguments"
+        fi
+
+        SetTitle "$title"
     fi
 }
 
@@ -2353,7 +2472,7 @@ function gh_pr {
 }
 
 function gh_resolve_pr {
-    local format=$'endpoint: %e\nowner: %o\nrepo: %r\nnumber: %n\nassignees: %a\nreviewers: %R\n'
+    local format=$'endpoint: %e\nowner: %o\nrepo: %r\nnumber: %n\nbranch: %b\nassignees: %a\nreviewers: %R\n'
     while (( $# > 0 ))
     do
         case "$1" in
@@ -3919,27 +4038,14 @@ function CreatePullRequest {
     local body=
     if test "$title" == ""
     then
-        GetGitRootRelative
-        local titles_file="$OUT"/.git/gh.titles
-        titles_file="${titles_file#./}"
-
-        if [ -r "$titles_file" ]
-        then
-            while read -r
-            do
-                if [[ "$REPLY" =~ ^"$branch"$'\t'(.*) ]]
-                then
-                    title="${BASH_REMATCH[1]}"
-                    break
-                fi
-            done < "$titles_file"
-        fi
+        GetTitle
+        title="$OUT"
 
         if test "$title" == ""
         then
             # Consider opening up an editor with the last message as the
             # suggestion for the title.
-            Fail "No title set and none found in $titles_file"
+            Fail "Missing title"
         fi
     fi
 
@@ -3987,7 +4093,12 @@ function GetBranchName {
     ResolveEndpoint "$endpoint"
     local user="$OUT2"
 
-    OUT="$user/$branch"
+    # The branch needs to be unique across time, which is hard for small fixes,
+    # so add time-dependent part.
+    local time
+    printf -v time "%(%Y%m%d)T"
+
+    OUT="$user/$time-$branch"
 }
 
 function GitRefsAreEqual {
@@ -4161,28 +4272,18 @@ function gh_checkin {
 
     git push -q -u "$remote" "$remote_branch"
 
-    if test "$root" == .
-    then
-        local titles_file=.git/gh.titles
-    else
-        local titles_file="$root"/.git/gh.titles
-    fi
-
     if GetPullRequestNumber "$endpoint" "$owner" "$repo" "$remote_branch"
     then
         local number="$OUT"
         local url="$OUT2"
         echo "Found pull request $url"
     else
-        local saved_title=
-        if test -r "$titles_file"
+        GetTitle
+        local saved_title="$OUT"
+        if (( ${#saved_title} > 0 ))
         then
-            saved_title=$(< "$titles_file")
-            if (( ${#saved_title} > 0 ))
-            then
-                title="$saved_title"
-                echo "Using saved PR title: $title"
-            fi
+            title="$saved_title"
+            echo "Using saved PR title: $title"
         fi
 
         CreatePullRequest "$endpoint" "$owner" "$repo" "$remote_branch" "$title"
@@ -4190,7 +4291,8 @@ function gh_checkin {
         local url="$OUT2"
         echo "Created pull request $url"
     fi
-    rm -f "$titles_file" # Avoid leaking title file across PRs
+
+    DeleteTitle
 
     if $open_google_chrome
     then
@@ -4439,6 +4541,22 @@ function gh_commit_before {
     else
         git log -n 1 "$commit"
     fi
+}
+
+function gh_timeof {
+    local ref=HEAD
+    if (( $# > 0 ))
+    then
+        ref="$1"
+        shift
+    fi
+
+    if (( $# > 0 ))
+    then
+        UsageError timeof "Command takes at most one argument"
+    fi
+
+    TZ=UTC git log -1 --first-parent --topo-order --date=iso-local --pretty='format:%cd' "$ref"
 }
 
 function gh_checkout {
@@ -5891,6 +6009,7 @@ declare -A UNOFFICIAL_COMMANDS=(
     [new-pr]=gh_new_pr
     [new]=gh_new_pr
     [pending]=gh_pending
+    [pre]=gh_new_pr
     [prepare]=gh_new_pr
     [prepare-pr]=gh_new_pr
     [p]=gh_stack_pop
@@ -5914,6 +6033,7 @@ declare -A UNOFFICIAL_COMMANDS=(
     [status]=gh_status
     [sub]=gh_submit
     [submit]=gh_submit
+    [timeof]=gh_timeof
     [uncommit]=gh_uncommit
     [up]=gh_update
     [update]=gh_update
