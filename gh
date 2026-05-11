@@ -1431,6 +1431,7 @@ function gh_new_pr {
              "Please verify and manually run rest of the commands"
     fi
 
+    # Urg, this disallows rebasing with the default branch later.
     Run git push -u "$upstream_remote" "$new_branch"
 
     SetTitle "$title"
@@ -2095,6 +2096,8 @@ function GetHeadAt {
     OUT="$head"
 }
 
+# The HEAD reference of a remote is a local symbolic reference to the default
+# branch.  This function actually returns the default branch.
 function ReadRemoteHead {
     local remote="$1"
 
@@ -2464,11 +2467,16 @@ function gh_pr {
 
     if $open
     then
-        google-chrome "$url"
+        OpenChrome "$url"
     else
         printf "%s\n" "$url"
     fi
 
+}
+
+function OpenChrome {
+    # https://issues.chromium.org/issues/491801534
+    google-chrome --new-window "$@"
 }
 
 function gh_resolve_pr {
@@ -3760,7 +3768,7 @@ function CommitView {
                 echo
                 if test "$url" != ""
                 then
-                    google-chrome "$url"
+                    OpenChrome "$url"
                 fi
                 ;;
             $'\n')
@@ -3795,7 +3803,7 @@ function gh_www {
     local number="$OUT"
     local url="$OUT2"
 
-    google-chrome "$url"
+    OpenChrome "$url"
 }
 
 function gh_submit {
@@ -3856,7 +3864,7 @@ function gh_submit {
 
     if $open_chrome
     then
-        google-chrome "$url"
+        OpenChrome "$url"
     fi
 
     if $wait
@@ -4296,7 +4304,7 @@ function gh_checkin {
 
     if $open_google_chrome
     then
-        google-chrome "$url"
+        OpenChrome "$url"
     fi
 
     if $wait
@@ -4763,7 +4771,6 @@ function gh_diff {
 
 function gh_head {
     ResolveUpstream --fallback
-    local remote="$OUT"
     local head="$OUT3"
 
     GetBranch
