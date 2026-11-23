@@ -576,7 +576,7 @@ function Curl {
     local -a command=(
         curl
         --silent
-        --fail
+        --fail-with-body
         --output "$response_file"
         --write-out "%{http_code}"
         -H "Content-Type: application/json"
@@ -5581,12 +5581,19 @@ function WaitForChecksThen {
 
         #   error: unable to delete 'hakonhall/add-gitignore': remote ref does not exist
         #   error: failed to push some refs to 'git@github.com:hakonhall/gh.git'"
+        #
+        #  ! [remote rejected] hakonhall/20261008-support-get-json---output (cannot lock ref 'refs/heads/hakonhall/20261008-support-get-json---output': unable to resolve reference 'refs/heads/hakonhall/20261008-support-get-json---output')
+        #  error: failed to push some refs to 'github.com:vespaai/hakon.git'
+
         local output
         if output=$(git push --quiet --delete origin "$branch" 2>&1)
         then
             test "$output" == "" || printf "%s\n" "$output"
-        elif ! [[ "$output" == *'remote ref does not exist'* ]]
+        elif [[ "$output" == *'remote ref does not exist'* ]] || \
+                 [[ "$output" == *'unable to resolve reference'* ]]
         then
+            :
+        else
             printf "%s\n" "$output" >&2
             return 1
         fi
