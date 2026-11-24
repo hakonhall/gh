@@ -4012,12 +4012,14 @@ function RawCreatePullRequest {
     local title="$OUT"
     ToJsonString "$6"
     local body="$OUT"
+    local draft="${7:-false}"  # Optional: true or false
 
     local data="{
   \"head\": $branch_to_review,
   \"base\": $merge_branch,
   \"title\": $title,
-  \"body\": $body
+  \"body\": $body,
+  \"draft\": $draft
 }"
 
     PostRest "$endpoint" "/repos/$owner/$repo/pulls" -d "$data"
@@ -4039,6 +4041,7 @@ function CreatePullRequest {
     local repo="$3"
     local branch="$4"
     local title="$5"  # Optional
+    local draft="${6:-false}"  # Optional: true or false
 
     GetOriginHead
     local master="$OUT"
@@ -4058,7 +4061,7 @@ function CreatePullRequest {
     fi
 
     RawCreatePullRequest "$owner" "$repo" "$branch" \
-                         "$master" "$title" "$body"
+                         "$master" "$title" "$body" "$draft"
     # Pass through output variables
 }
 
@@ -4071,7 +4074,9 @@ Options:
   --                       Any next argument is interpreted as MESSAGE.
   --assignee,-a USER       Assign pull request to USER.
   --comment,-c COMMENT     Use MESSAGE for branch name, and COMMENT for commit.
-  --edit,-e                Edit the commit message (MESSAGE) before committing.
+  --draft,-d               Create the pull request as a draft.  Has no effect if
+                           the pull request already exists.
+  --edit,-e               Edit the commit message (MESSAGE) before committing.
   --merge,-m               Merge once all pull request checks pass.
   --open,-o                Open pull request in Google Chrome.
   --ptal,-p                Add a PTAL message to the pull request.
@@ -4129,7 +4134,7 @@ function GitRefsAreEqual {
 
 function gh_checkin {
     local assignee="" merge=false ptal=false open_google_chrome=false
-    local escaped_edit_option= reviewers="" wait=true comment=
+    local escaped_edit_option= reviewers="" wait=true comment= draft=false
     while (( $# > 0 ))
     do
         case "$1" in
@@ -4144,6 +4149,10 @@ function gh_checkin {
             -c|--comment)
                 comment="$2"
                 shift 2
+                ;;
+            -d|--draft)
+                draft=true
+                shift
                 ;;
             -e|--edit)
                 escaped_edit_option=--edit
@@ -4174,6 +4183,10 @@ function gh_checkin {
             *) break ;;
         esac
     done
+
+    if $draft && $merge; then
+        UsageError checkin "--draft and --merge are mutually exclusive"
+    fi
 
     local title=
     if (( $# > 0 )); then
@@ -4294,10 +4307,16 @@ function gh_checkin {
             echo "Using saved PR title: $title"
         fi
 
-        CreatePullRequest "$endpoint" "$owner" "$repo" "$remote_branch" "$title"
+        CreatePullRequest "$endpoint" "$owner" "$repo" "$remote_branch" \
+                          "$title" "$draft"
         local number="$OUT"
         local url="$OUT2"
-        echo "Created pull request $url"
+        if $draft
+        then
+            echo "Created draft pull request $url"
+        else
+            echo "Created pull request $url"
+        fi
     fi
 
     DeleteTitle
